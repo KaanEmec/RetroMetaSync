@@ -6,7 +6,79 @@ import xml.etree.ElementTree as ET
 
 from retrometasync.config.ecosystems import ES_FAMILY_TAG_TO_ASSET_TYPE
 from retrometasync.core.loaders.base import BaseLoader, LoaderInput, LoaderResult
-from retrometasync.core.models import Asset, Game, MetadataSource, System
+from retrometasync.core.models import Asset, AssetType, Game, MetadataSource, System
+
+ROM_EXTENSIONS: set[str] = {
+    ".zip",
+    ".7z",
+    ".rar",
+    ".chd",
+    ".cue",
+    ".iso",
+    ".bin",
+    ".img",
+    ".mdf",
+    ".pbp",
+    ".nes",
+    ".unf",
+    ".sfc",
+    ".smc",
+    ".fig",
+    ".gba",
+    ".gb",
+    ".gbc",
+    ".nds",
+    ".3ds",
+    ".n64",
+    ".z64",
+    ".v64",
+    ".sms",
+    ".gg",
+    ".gen",
+    ".md",
+    ".32x",
+    ".a26",
+    ".a78",
+    ".pce",
+    ".sg",
+    ".ngp",
+    ".ngc",
+    ".ws",
+    ".wsc",
+    ".lnx",
+    ".m3u",
+}
+
+ASSET_EXTENSIONS: set[str] = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".pdf",
+    ".cbz",
+    ".cbr",
+}
+
+ASSET_DIRECTORY_HINTS: set[str] = {
+    "images",
+    "videos",
+    "manuals",
+    "downloaded_images",
+    "downloaded_videos",
+    "downloaded_media",
+    "covers",
+    "screenshots",
+    "miximages",
+    "thumbnails",
+    "imgs",
+    "media",
+}
 
 
 class ESGamelistLoader(BaseLoader):
@@ -16,26 +88,32 @@ class ESGamelistLoader(BaseLoader):
         systems = list(load_input.systems)
         warnings: list[str] = []
         games_by_system: dict[str, list[Game]] = {}
+        progress = load_input.progress_callback
 
         if not systems:
             systems = self._discover_systems(load_input.source_root)
+            self._emit(progress, f"[scan] Discovered {len(systems)} systems from filesystem.")
 
         for system in systems:
+            self._emit(progress, f"[scan] Reading system '{system.system_id}' at {system.rom_root}")
             gamelist_path = self._resolve_gamelist_path(system)
-            if not gamelist_path or not gamelist_path.exists():
-                warnings.append(f"Missing gamelist.xml for system '{system.system_id}'.")
-                games_by_system[system.system_id] = []
-                continue
+            if gamelist_path and gamelist_path.exists():
+                if gamelist_path not in system.metadata_paths:
+                    system.metadata_paths.append(gamelist_path)
+                system.metadata_source = MetadataSource.GAMELIST_XML
 
-            if gamelist_path not in system.metadata_paths:
-                system.metadata_paths.append(gamelist_path)
-            system.metadata_source = MetadataSource.GAMELIST_XML
-
-            try:
-                games_by_system[system.system_id] = self._parse_gamelist(system, gamelist_path)
-            except ET.ParseError as exc:
-                warnings.append(f"Failed to parse {gamelist_path}: {exc}")
-                games_by_system[system.system_id] = []
+                try:
+                    games_by_system[system.system_id] = self._parse_gamelist(
+                        system,
+                        gamelist_path,
+                        progress_callback=progress,
+                    )
+                except ET.ParseError as exc:
+                    warnings.append(f"Failed to parse {gamelist_path}: {exc}")
+                    games_by_system[system.system_id] = self._scan_games_without_metadata(system, progress_callback=progress)
+            else:
+                warnings.append(f"Missing gamelist.xml for system '{system.system_id}'. Falling back to file scan.")
+                games_by_system[system.system_id] = self._scan_games_without_metadata(system, progress_callback=progress)
 
         return LoaderResult(systems=systems, games_by_system=games_by_system, warnings=warnings)
 
@@ -72,10 +150,16 @@ class ESGamelistLoader(BaseLoader):
         fallback = system.rom_root / "gamelist.xml"
         return fallback
 
-    def _parse_gamelist(self, system: System, gamelist_path: Path) -> list[Game]:
+    def _parse_gamelist(
+        self,
+        system: System,
+        gamelist_path: Path,
+        progress_callback=None,
+    ) -> list[Game]:
         tree = ET.parse(gamelist_path)
         root = tree.getroot()
-        games: list[Game] = []
+        games_by_rom: dict[str, Game] = {}
+        self._emit(progress_callback, f"[scan] Parsing metadata: {gamelist_path}")
 
         for game_node in root.findall("game"):
             rom_ref = self._safe_text(game_node.find("path"))
@@ -109,9 +193,26 @@ class ESGamelistLoader(BaseLoader):
             )
 
             self._attach_assets_from_es_tags(game, game_node, system.rom_root, gamelist_path.parent)
-            games.append(game)
+            games_by_rom[self._game_key(rom_path)] = game
 
-        return games
+        # File-system reconciliation: add missing ROMs and discover assets not referenced in XML.
+        scanned_games = self._scan_games_without_metadata(system, progress_callback=progress_callback)
+        scanned_by_rom = {self._game_key(game.rom_path): game for game in scanned_games}
+
+        for rom_key, scanned_game in scanned_by_rom.items():
+            if rom_key not in games_by_rom:
+                games_by_rom[rom_key] = scanned_game
+                continue
+
+            existing = games_by_rom[rom_key]
+            known_assets = {asset.file_path.resolve().as_posix().lower() for asset in existing.assets}
+            for asset in scanned_game.assets:
+                key = asset.file_path.resolve().as_posix().lower()
+                if key not in known_assets:
+                    existing.assets.append(asset)
+                    known_assets.add(key)
+
+        return sorted(games_by_rom.values(), key=lambda game: game.rom_filename.lower())
 
     def _attach_assets_from_es_tags(
         self, game: Game, game_node: ET.Element, rom_root: Path, metadata_dir: Path
@@ -130,6 +231,123 @@ class ESGamelistLoader(BaseLoader):
                     match_key="explicit_path",
                 )
             )
+
+    def _scan_games_without_metadata(self, system: System, progress_callback=None) -> list[Game]:
+        self._emit(progress_callback, f"[scan] Scanning ROM files under: {system.rom_root}")
+        games: list[Game] = []
+        roms = self._scan_rom_files(system.rom_root)
+        self._emit(progress_callback, f"[scan] Found {len(roms)} ROM files for system '{system.system_id}'.")
+        asset_index = self._build_asset_index(system.rom_root, progress_callback=progress_callback)
+        for rom_path in roms:
+            game = Game(
+                rom_path=rom_path,
+                system_id=system.system_id,
+                title=rom_path.stem,
+            )
+            for asset in self._discover_assets_for_rom(rom_path, asset_index):
+                game.assets.append(asset)
+            games.append(game)
+        return sorted(games, key=lambda game: game.rom_filename.lower())
+
+    def _scan_rom_files(self, rom_root: Path) -> list[Path]:
+        roms: list[Path] = []
+        for path in rom_root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in ROM_EXTENSIONS:
+                continue
+            if self._is_under_asset_dir(path, rom_root):
+                continue
+            roms.append(path.resolve())
+        return roms
+
+    def _discover_assets_for_rom(self, rom_path: Path, asset_index: dict[str, list[Path]]) -> list[Asset]:
+        assets: list[Asset] = []
+        basename = rom_path.stem.lower()
+        for path in asset_index.get(basename, []):
+            asset_type = self._infer_asset_type(path)
+            assets.append(
+                Asset(
+                    asset_type=asset_type,
+                    file_path=path.resolve(),
+                    format=path.suffix.lower().lstrip(".") or None,
+                    match_key="same_basename",
+                )
+            )
+
+        # De-duplicate while preserving order.
+        unique: list[Asset] = []
+        seen: set[str] = set()
+        for asset in assets:
+            key = asset.file_path.as_posix().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(asset)
+        return unique
+
+    def _build_asset_index(self, rom_root: Path, progress_callback=None) -> dict[str, list[Path]]:
+        self._emit(progress_callback, f"[scan] Indexing assets under: {rom_root}")
+        index: dict[str, list[Path]] = {}
+        scanned = 0
+        for path in rom_root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in ASSET_EXTENSIONS:
+                continue
+            if not self._is_under_asset_dir(path, rom_root):
+                continue
+            scanned += 1
+            stem_lower = path.stem.lower()
+            normalized_stem = self._strip_asset_suffix(stem_lower)
+            index.setdefault(normalized_stem, []).append(path.resolve())
+            if scanned % 500 == 0:
+                self._emit(progress_callback, f"[scan] Indexed {scanned} asset files...")
+        self._emit(progress_callback, f"[scan] Indexed {scanned} asset files total.")
+        return index
+
+    def _infer_asset_type(self, path: Path) -> AssetType:
+        stem = path.stem.lower()
+        parent = path.parent.name.lower()
+        suffix = path.suffix.lower()
+
+        if suffix in {".mp4", ".mkv", ".avi", ".mov"} or "video" in parent:
+            return AssetType.VIDEO
+        if suffix in {".pdf", ".cbz", ".cbr"} or "manual" in parent:
+            return AssetType.MANUAL
+        if stem.endswith("-marquee") or "marquee" in parent or "wheel" in parent:
+            return AssetType.MARQUEE
+        if stem.endswith("-thumb") or "thumb" in parent or "screenshot" in parent:
+            return AssetType.SCREENSHOT_GAMEPLAY
+        if stem.endswith("-bezel"):
+            return AssetType.BEZEL
+        if "fanart" in parent:
+            return AssetType.FANART
+        return AssetType.BOX_FRONT
+
+    @staticmethod
+    def _strip_asset_suffix(stem: str) -> str:
+        for suffix in ("-image", "-thumb", "-marquee", "-video", "-bezel", "-fanart", "-manual"):
+            if stem.endswith(suffix):
+                return stem[: -len(suffix)]
+        return stem
+
+    @staticmethod
+    def _is_under_asset_dir(path: Path, rom_root: Path) -> bool:
+        try:
+            relative = path.relative_to(rom_root)
+        except ValueError:
+            return False
+        return any(part.lower() in ASSET_DIRECTORY_HINTS for part in relative.parts[:-1])
+
+    @staticmethod
+    def _game_key(path: Path) -> str:
+        return path.resolve().as_posix().lower()
+
+    @staticmethod
+    def _emit(callback, message: str) -> None:
+        if callback is not None:
+            callback(message)
 
     @staticmethod
     def _resolve_path(path_value: str, rom_root: Path, metadata_dir: Path) -> Path:

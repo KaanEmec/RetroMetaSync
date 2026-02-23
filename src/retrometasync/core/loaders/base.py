@@ -3,14 +3,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from retrometasync.core.models import Game, System
+
+ProgressCallback = Callable[[str], None]
 
 
 @dataclass(slots=True)
 class LoaderInput:
     source_root: Path
     systems: list[System] = field(default_factory=list)
+    progress_callback: ProgressCallback | None = None
 
 
 @dataclass(slots=True)

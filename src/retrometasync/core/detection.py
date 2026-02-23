@@ -2,9 +2,65 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from retrometasync.config.ecosystems import ECOSYSTEMS, SIGNATURE_HINTS
 from retrometasync.core.models import Library, MetadataSource, System
+
+ROM_EXTENSIONS: set[str] = {
+    ".zip",
+    ".7z",
+    ".rar",
+    ".chd",
+    ".cue",
+    ".iso",
+    ".bin",
+    ".img",
+    ".mdf",
+    ".pbp",
+    ".nes",
+    ".unf",
+    ".sfc",
+    ".smc",
+    ".fig",
+    ".gba",
+    ".gb",
+    ".gbc",
+    ".nds",
+    ".3ds",
+    ".n64",
+    ".z64",
+    ".v64",
+    ".sms",
+    ".gg",
+    ".gen",
+    ".md",
+    ".32x",
+    ".a26",
+    ".a78",
+    ".pce",
+    ".sg",
+    ".ngp",
+    ".ngc",
+    ".ws",
+    ".wsc",
+    ".lnx",
+    ".m3u",
+}
+
+ASSET_DIRECTORY_HINTS: set[str] = {
+    "images",
+    "videos",
+    "manuals",
+    "downloaded_images",
+    "downloaded_videos",
+    "downloaded_media",
+    "media",
+    "thumbnails",
+    "screenshots",
+    "covers",
+    "miximages",
+}
 
 
 @dataclass(slots=True)
@@ -51,8 +107,17 @@ class _ScanFacts:
 class LibraryDetector:
     """Detect a retro library ecosystem and enumerate system roots."""
 
-    def detect(self, source_root: Path) -> DetectionResult:
+    def __init__(self) -> None:
+        self._progress_callback = None
+
+    def detect(
+        self,
+        source_root: Path,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DetectionResult:
+        self._progress_callback = progress_callback
         root = source_root.expanduser().resolve()
+        self._emit(progress_callback, f"[detect] Scanning root: {root}")
         facts = self._scan_facts(root)
         scores = self._score_ecosystems(root, facts)
         ecosystem = self._classify_ecosystem(facts, scores)
@@ -60,6 +125,10 @@ class LibraryDetector:
         confidence = self._confidence_for(ecosystem, scores)
         systems = self._enumerate_systems(root, ecosystem, facts)
         warnings = self._build_warnings(facts, ecosystem)
+        self._emit(
+            progress_callback,
+            f"[detect] Ecosystem={ecosystem}, family={family}, confidence={confidence}, systems={len(systems)}",
+        )
 
         return DetectionResult(
             source_root=root,
@@ -224,6 +293,8 @@ class LibraryDetector:
         seen_ids: set[str] = set()
 
         gamelist_files = list(root.rglob("gamelist.xml"))
+        if gamelist_files:
+            self._emit(self._progress_callback, f"[detect] Found {len(gamelist_files)} gamelist.xml files.")
         for gamelist_path in gamelist_files:
             system_dir = gamelist_path.parent
             if system_dir.name.lower() in {"gamelists", "metadata"}:
@@ -245,43 +316,70 @@ class LibraryDetector:
                 )
             )
 
-        if systems:
-            return sorted(systems, key=lambda item: item.system_id)
-
-        # Fallback for empty metadata: infer from common roms directory.
-        roms_root = root / "roms"
-        if roms_root.exists():
+        # Also include metadata-light systems inferred from real directories.
+        for roms_root in self._candidate_rom_roots(root):
+            self._emit(self._progress_callback, f"[detect] Scanning candidate ROM root: {roms_root}")
             for child in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+                if not self._looks_like_system_dir(child):
+                    continue
+                if child.name.lower() in {"images", "videos", "manuals"}:
+                    continue
+                system_id = child.name.lower()
+                if system_id in seen_ids:
+                    continue
+                seen_ids.add(system_id)
                 systems.append(
                     System(
-                        system_id=child.name.lower(),
+                        system_id=system_id,
                         display_name=child.name,
                         rom_root=child,
                         metadata_source=MetadataSource.NONE,
                         detected_ecosystem="es_classic",
                     )
                 )
-        return systems
+                self._emit(self._progress_callback, f"[detect] Detected system folder: {child}")
+        return sorted(systems, key=lambda item: item.system_id)
 
     def _systems_from_es_de(self, root: Path) -> list[System]:
         systems: list[System] = []
+        seen_ids: set[str] = set()
         gamelists_root = root / "ES-DE" / "gamelists"
-        if not gamelists_root.exists():
-            return systems
-
-        for system_dir in sorted(path for path in gamelists_root.iterdir() if path.is_dir()):
-            gamelist_path = system_dir / "gamelist.xml"
-            systems.append(
-                System(
-                    system_id=system_dir.name.lower(),
-                    display_name=system_dir.name,
-                    rom_root=system_dir,
-                    metadata_source=MetadataSource.GAMELIST_XML,
-                    metadata_paths=[gamelist_path] if gamelist_path.exists() else [],
-                    detected_ecosystem="es_de",
+        if gamelists_root.exists():
+            self._emit(self._progress_callback, f"[detect] ES-DE gamelist root found: {gamelists_root}")
+            for system_dir in sorted(path for path in gamelists_root.iterdir() if path.is_dir()):
+                gamelist_path = system_dir / "gamelist.xml"
+                system_id = system_dir.name.lower()
+                seen_ids.add(system_id)
+                systems.append(
+                    System(
+                        system_id=system_id,
+                        display_name=system_dir.name,
+                        rom_root=system_dir,
+                        metadata_source=MetadataSource.GAMELIST_XML,
+                        metadata_paths=[gamelist_path] if gamelist_path.exists() else [],
+                        detected_ecosystem="es_de",
+                    )
                 )
-            )
-        return systems
+
+        for roms_root in self._candidate_rom_roots(root):
+            self._emit(self._progress_callback, f"[detect] ES-DE fallback ROM scan root: {roms_root}")
+            for child in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+                if not self._looks_like_system_dir(child):
+                    continue
+                system_id = child.name.lower()
+                if system_id in seen_ids:
+                    continue
+                seen_ids.add(system_id)
+                systems.append(
+                    System(
+                        system_id=system_id,
+                        display_name=child.name,
+                        rom_root=child,
+                        metadata_source=MetadataSource.NONE,
+                        detected_ecosystem="es_de",
+                    )
+                )
+        return sorted(systems, key=lambda item: item.system_id)
 
     def _systems_from_launchbox(self, root: Path) -> list[System]:
         systems: list[System] = []
@@ -424,3 +522,33 @@ class LibraryDetector:
         if "*" in hint:
             return self._has_any(root, hint)
         return self._has_any(root, hint) or (root / hint).exists()
+
+    @staticmethod
+    def _emit(callback: Callable[[str], None] | None, message: str) -> None:
+        if callback is not None:
+            callback(message)
+
+    @staticmethod
+    def _candidate_rom_roots(root: Path) -> list[Path]:
+        candidates = [root / "roms", root / "Roms", root]
+        seen: set[str] = set()
+        unique: list[Path] = []
+        for candidate in candidates:
+            key = candidate.as_posix().lower()
+            if key in seen or not candidate.exists() or not candidate.is_dir():
+                continue
+            seen.add(key)
+            unique.append(candidate)
+        return unique
+
+    def _looks_like_system_dir(self, path: Path) -> bool:
+        if (path / "gamelist.xml").exists():
+            return True
+        if path.name.lower() in ASSET_DIRECTORY_HINTS:
+            return False
+        for file_path in path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() in ROM_EXTENSIONS:
+                return True
+        return False

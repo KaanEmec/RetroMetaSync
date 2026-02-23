@@ -133,8 +133,14 @@ class MainWindow(ctk.CTk):
 
     def _analyze_worker(self, source_path: Path) -> None:
         try:
-            detection_result = self.detector.detect(source_path)
-            normalization_result = self.normalizer.normalize(detection_result)
+            detection_result = self.detector.detect(
+                source_path,
+                progress_callback=lambda line: self.result_queue.put(("analysis_progress", line)),
+            )
+            normalization_result = self.normalizer.normalize(
+                detection_result,
+                progress_callback=lambda line: self.result_queue.put(("analysis_progress", line)),
+            )
             self.result_queue.put(("analysis_complete", (detection_result, normalization_result)))
         except Exception as exc:  # noqa: BLE001
             self.result_queue.put(("analysis_error", str(exc)))
@@ -149,6 +155,8 @@ class MainWindow(ctk.CTk):
                     self._on_analysis_complete(detection_result, normalization_result)
                 elif event_type == "analysis_error":
                     self._on_analysis_error(str(payload))
+                elif event_type == "analysis_progress":
+                    self.progress_log.log(str(payload))
                 elif event_type == "conversion_progress":
                     self.progress_log.log(str(payload))
                 elif event_type == "conversion_complete":

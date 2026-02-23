@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 from retrometasync.core.detection import DetectionResult
 from retrometasync.core.loaders import ESGamelistLoader, LaunchBoxXmlLoader, LoaderInput, LoaderResult
@@ -16,7 +17,11 @@ class NormalizationResult:
 class LibraryNormalizer:
     """Builds a normalized in-memory library model from detection output."""
 
-    def normalize(self, detection_result: DetectionResult) -> NormalizationResult:
+    def normalize(
+        self,
+        detection_result: DetectionResult,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> NormalizationResult:
         loader = self._select_loader(detection_result.detected_ecosystem)
         if loader is None:
             library = detection_result.to_library()
@@ -26,7 +31,11 @@ class LibraryNormalizer:
             )
 
         load_result = loader.load(
-            LoaderInput(source_root=detection_result.source_root, systems=detection_result.systems)
+            LoaderInput(
+                source_root=detection_result.source_root,
+                systems=detection_result.systems,
+                progress_callback=progress_callback,
+            )
         )
         library = self._to_library(detection_result, load_result)
         return NormalizationResult(library=library, warnings=load_result.warnings)

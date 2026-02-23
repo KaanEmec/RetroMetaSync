@@ -16,8 +16,13 @@ class LaunchBoxXmlLoader(BaseLoader):
         warnings: list[str] = []
         systems = list(load_input.systems) or self._discover_systems(source_root)
         games_by_system: dict[str, list[Game]] = {}
+        progress = load_input.progress_callback
+        if progress is not None:
+            progress(f"[scan] LaunchBox systems discovered: {len(systems)}")
 
         for system in systems:
+            if progress is not None:
+                progress(f"[scan] Reading LaunchBox platform '{system.display_name}'")
             xml_path = self._resolve_platform_xml(system, source_root)
             if xml_path is None or not xml_path.exists():
                 warnings.append(f"Missing LaunchBox platform XML for '{system.system_id}'.")

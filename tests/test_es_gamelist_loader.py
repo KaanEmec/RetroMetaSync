@@ -78,6 +78,37 @@ class ESGamelistLoaderTests(unittest.TestCase):
             self.assertIn("Platformer", game.genres)
             self.assertIn("en", game.languages)
 
+    def test_scans_real_roms_and_assets_without_gamelist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            snes_dir = root / "roms" / "snes"
+            (snes_dir / "images").mkdir(parents=True, exist_ok=True)
+            (snes_dir / "videos").mkdir(parents=True, exist_ok=True)
+            (snes_dir / "manuals").mkdir(parents=True, exist_ok=True)
+
+            rom_path = snes_dir / "Donkey Kong Country.sfc"
+            rom_path.write_bytes(b"rom")
+            (snes_dir / "images" / "Donkey Kong Country-image.png").write_bytes(b"img")
+            (snes_dir / "videos" / "Donkey Kong Country-video.mp4").write_bytes(b"vid")
+            (snes_dir / "manuals" / "Donkey Kong Country.pdf").write_bytes(b"pdf")
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=snes_dir,
+                metadata_source=MetadataSource.NONE,
+                metadata_paths=[],
+            )
+
+            result = ESGamelistLoader().load(LoaderInput(source_root=root, systems=[system]))
+            self.assertIn("snes", result.games_by_system)
+            self.assertEqual(len(result.games_by_system["snes"]), 1)
+
+            game = result.games_by_system["snes"][0]
+            self.assertEqual(game.title, "Donkey Kong Country")
+            self.assertEqual(game.rom_path, rom_path.resolve())
+            self.assertGreaterEqual(len(game.assets), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
