@@ -8,6 +8,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from retrometasync.core.loaders import LaunchBoxXmlLoader, LoaderInput
+from retrometasync.core.models import AssetVerificationState
 
 
 class LaunchBoxXmlLoaderTests(unittest.TestCase):
@@ -62,6 +63,29 @@ class LaunchBoxXmlLoaderTests(unittest.TestCase):
             self.assertIn("en", game.languages)
             self.assertIn("US", game.regions)
             self.assertEqual(len(game.assets), 1)
+            self.assertEqual(game.assets[0].verification_state, AssetVerificationState.UNCHECKED)
+
+    def test_loads_when_source_is_launchbox_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            launchbox_root = Path(temp_dir) / "LaunchBox"
+            platform_dir = launchbox_root / "Data" / "Platforms"
+            platform_dir.mkdir(parents=True, exist_ok=True)
+            (launchbox_root / "Games").mkdir(parents=True, exist_ok=True)
+
+            xml_content = """<?xml version="1.0"?>
+<LaunchBox>
+  <Game>
+    <Title>F-Zero X</Title>
+    <ApplicationPath>Games/F-Zero X.z64</ApplicationPath>
+  </Game>
+</LaunchBox>
+"""
+            (platform_dir / "Nintendo 64.xml").write_text(xml_content, encoding="utf-8")
+
+            result = LaunchBoxXmlLoader().load(LoaderInput(source_root=launchbox_root))
+            self.assertEqual(len(result.warnings), 0)
+            self.assertIn("nintendo_64", result.games_by_system)
+            self.assertEqual(len(result.games_by_system["nintendo_64"]), 1)
 
 
 if __name__ == "__main__":

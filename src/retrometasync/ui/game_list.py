@@ -12,7 +12,7 @@ from tkinter import ttk
 
 import customtkinter as ctk
 
-from retrometasync.core.models import AssetType, Game, Library
+from retrometasync.core.models import AssetType, AssetVerificationState, Game, Library
 from retrometasync.ui.table_perf import (
     BATCH_INSERT_SIZE,
     FILTER_DEBOUNCE_MS,
@@ -56,17 +56,48 @@ class GameRowRecord:
     has_image: bool
     has_video: bool
     has_manual: bool
+    missing_image: bool
+    missing_video: bool
+    missing_manual: bool
 
 
 def _build_key(system_id: str, game: Game) -> str:
     return f"{system_id}::{game.rom_path.as_posix()}"
 
 
-def _asset_tags(has_image: bool, has_video: bool, has_manual: bool) -> str:
+def _asset_status(game: Game, asset_types: set[AssetType]) -> str:
+    relevant_assets = [asset for asset in game.assets if asset.asset_type in asset_types]
+    if any(asset.verification_state == AssetVerificationState.VERIFIED_EXISTS for asset in relevant_assets):
+        return "has"
+    if any(asset.verification_state == AssetVerificationState.VERIFIED_MISSING for asset in relevant_assets):
+        return "missing"
+    return "unchecked"
+
+
+def _asset_tags(image_status: str, video_status: str, manual_status: str) -> str:
+    def label(kind: str, status: str) -> str:
+        if kind == "img":
+            if status == "has":
+                return "🖼 IMG"
+            if status == "missing":
+                return "⚪ NO-IMG"
+            return "❔ UNCHECKED-IMG"
+        if kind == "vid":
+            if status == "has":
+                return "🎞 VID"
+            if status == "missing":
+                return "⚪ NO-VID"
+            return "❔ UNCHECKED-VID"
+        if status == "has":
+            return "📘 MAN"
+        if status == "missing":
+            return "⚪ NO-MAN"
+        return "❔ UNCHECKED-MAN"
+
     parts = [
-        "🖼 IMG" if has_image else "⚪ NO-IMG",
-        "🎞 VID" if has_video else "⚪ NO-VID",
-        "📘 MAN" if has_manual else "⚪ NO-MAN",
+        label("img", image_status),
+        label("vid", video_status),
+        label("man", manual_status),
     ]
     return " | ".join(parts)
 
@@ -81,9 +112,9 @@ def _passes_asset_filter(record: GameRowRecord, asset_filter: str) -> bool:
     if asset_filter == "Has Manual":
         return record.has_manual
     if asset_filter == "Missing Video":
-        return not record.has_video
+        return record.missing_video
     if asset_filter == "Missing Manual":
-        return not record.has_manual
+        return record.missing_manual
     return True
 
 
@@ -102,18 +133,24 @@ class GameListViewModel:
             for game in games:
                 key = _build_key(system_id, game)
                 self._games_by_key[key] = game
-                has_image = any(a.asset_type in IMAGE_ASSET_TYPES for a in game.assets)
-                has_video = any(a.asset_type == AssetType.VIDEO for a in game.assets)
-                has_manual = any(a.asset_type == AssetType.MANUAL for a in game.assets)
+                image_status = _asset_status(game, IMAGE_ASSET_TYPES)
+                video_status = _asset_status(game, {AssetType.VIDEO})
+                manual_status = _asset_status(game, {AssetType.MANUAL})
+                has_image = image_status == "has"
+                has_video = video_status == "has"
+                has_manual = manual_status == "has"
                 record = GameRowRecord(
                     key=key,
                     system_id=system_id,
                     game_title=normalize_row_text(game.title, MAX_COLUMN_TEXT_LEN),
                     rom_filename=normalize_row_text(game.rom_filename, MAX_COLUMN_TEXT_LEN),
-                    assets=_asset_tags(has_image, has_video, has_manual),
+                    assets=_asset_tags(image_status, video_status, manual_status),
                     has_image=has_image,
                     has_video=has_video,
                     has_manual=has_manual,
+                    missing_image=image_status == "missing",
+                    missing_video=video_status == "missing",
+                    missing_manual=manual_status == "missing",
                 )
                 self._rows.append(record)
                 self._rows_by_key[key] = record

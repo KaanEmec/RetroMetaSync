@@ -109,6 +109,61 @@ class ESGamelistLoaderTests(unittest.TestCase):
             self.assertEqual(game.rom_path, rom_path.resolve())
             self.assertGreaterEqual(len(game.assets), 3)
 
+    def test_quick_mode_skips_deep_asset_index_for_missing_gamelist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            snes_dir = root / "roms" / "snes"
+            (snes_dir / "images").mkdir(parents=True, exist_ok=True)
+            rom_path = snes_dir / "EarthBound.sfc"
+            rom_path.write_bytes(b"rom")
+            (snes_dir / "images" / "EarthBound-image.png").write_bytes(b"img")
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=snes_dir,
+                metadata_source=MetadataSource.NONE,
+                metadata_paths=[],
+            )
+            result = ESGamelistLoader().load(
+                LoaderInput(source_root=root, systems=[system], scan_mode="quick", max_asset_index_files=10)
+            )
+            game = result.games_by_system["snes"][0]
+            self.assertEqual(game.rom_path, rom_path.resolve())
+            self.assertEqual(len(game.assets), 0)
+
+    def test_quick_mode_with_gamelist_skips_filesystem_reconciliation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            snes_dir = root / "roms" / "snes"
+            snes_dir.mkdir(parents=True, exist_ok=True)
+
+            (snes_dir / "In Metadata.sfc").write_bytes(b"rom")
+            (snes_dir / "Only On Disk.sfc").write_bytes(b"rom")
+            gamelist_path = snes_dir / "gamelist.xml"
+            gamelist_path.write_text(
+                """<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./In Metadata.sfc</path>
+    <name>In Metadata</name>
+  </game>
+</gameList>
+""",
+                encoding="utf-8",
+            )
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=snes_dir,
+                metadata_source=MetadataSource.GAMELIST_XML,
+                metadata_paths=[gamelist_path],
+            )
+            result = ESGamelistLoader().load(LoaderInput(source_root=root, systems=[system], scan_mode="quick"))
+            self.assertEqual(len(result.games_by_system["snes"]), 1)
+            self.assertEqual(result.games_by_system["snes"][0].title, "In Metadata")
+
 
 if __name__ == "__main__":
     unittest.main()

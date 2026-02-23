@@ -5,7 +5,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from retrometasync.core.loaders.base import BaseLoader, LoaderInput, LoaderResult
-from retrometasync.core.models import Asset, AssetType, Game, MetadataSource, System
+from retrometasync.core.models import Asset, AssetType, AssetVerificationState, Game, MetadataSource, System
 
 
 class LaunchBoxXmlLoader(BaseLoader):
@@ -34,7 +34,12 @@ class LaunchBoxXmlLoader(BaseLoader):
             system.metadata_source = MetadataSource.LAUNCHBOX_XML
 
             try:
-                games_by_system[system.system_id] = self._parse_platform_xml(system, xml_path, source_root)
+                games_by_system[system.system_id] = self._parse_platform_xml(
+                    system,
+                    xml_path,
+                    source_root,
+                    progress_callback=progress,
+                )
             except ET.ParseError as exc:
                 warnings.append(f"Failed to parse {xml_path}: {exc}")
                 games_by_system[system.system_id] = []
@@ -43,7 +48,8 @@ class LaunchBoxXmlLoader(BaseLoader):
 
     def _discover_systems(self, source_root: Path) -> list[System]:
         systems: list[System] = []
-        platforms_root = source_root / "LaunchBox" / "Data" / "Platforms"
+        launchbox_root = self._launchbox_root(source_root)
+        platforms_root = launchbox_root / "Data" / "Platforms"
         if not platforms_root.exists():
             return systems
 
@@ -53,7 +59,7 @@ class LaunchBoxXmlLoader(BaseLoader):
                 System(
                     system_id=self._to_system_id(display_name),
                     display_name=display_name,
-                    rom_root=source_root / "LaunchBox",
+                    rom_root=launchbox_root,
                     metadata_source=MetadataSource.LAUNCHBOX_XML,
                     metadata_paths=[xml_path],
                     detected_ecosystem="launchbox",
@@ -66,20 +72,30 @@ class LaunchBoxXmlLoader(BaseLoader):
         if system.metadata_paths:
             return system.metadata_paths[0]
 
-        candidate = source_root / "LaunchBox" / "Data" / "Platforms" / f"{system.display_name}.xml"
+        launchbox_root = LaunchBoxXmlLoader._launchbox_root(source_root)
+        candidate = launchbox_root / "Data" / "Platforms" / f"{system.display_name}.xml"
         return candidate if candidate.exists() else None
 
-    def _parse_platform_xml(self, system: System, xml_path: Path, source_root: Path) -> list[Game]:
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
+    def _parse_platform_xml(
+        self,
+        system: System,
+        xml_path: Path,
+        source_root: Path,
+        progress_callback=None,
+    ) -> list[Game]:
         games: list[Game] = []
+        launchbox_root = self._launchbox_root(source_root)
+        parsed = 0
 
-        for game_node in root.findall("Game"):
+        for event, game_node in ET.iterparse(xml_path, events=("end",)):
+            if event != "end" or game_node.tag != "Game":
+                continue
             app_path_text = self._safe_text(game_node.find("ApplicationPath"))
             if not app_path_text:
+                game_node.clear()
                 continue
 
-            rom_path = self._resolve_path(app_path_text, source_root)
+            rom_path = self._resolve_path(app_path_text, launchbox_root)
             title = self._safe_text(game_node.find("Title")) or rom_path.stem
             game = Game(
                 rom_path=rom_path,
@@ -108,32 +124,53 @@ class LaunchBoxXmlLoader(BaseLoader):
 
             manual_path = self._safe_text(game_node.find("ManualPath"))
             if manual_path:
-                manual_resolved = self._resolve_path(manual_path, source_root)
+                manual_resolved = self._resolve_path(manual_path, launchbox_root)
                 game.assets.append(
                     Asset(
                         asset_type=AssetType.MANUAL,
                         file_path=manual_resolved,
                         format=manual_resolved.suffix.lower().lstrip(".") or None,
                         match_key="explicit_path",
+                        verification_state=AssetVerificationState.UNCHECKED,
                     )
                 )
 
-            self._append_asset_if_present(game, source_root, game_node, "FrontImagePath", AssetType.BOX_FRONT)
-            self._append_asset_if_present(game, source_root, game_node, "BackgroundImagePath", AssetType.FANART)
-            self._append_asset_if_present(game, source_root, game_node, "ScreenshotImagePath", AssetType.SCREENSHOT_GAMEPLAY)
-            self._append_asset_if_present(game, source_root, game_node, "VideoPath", AssetType.VIDEO)
-            self._append_asset_if_present(game, source_root, game_node, "LogoImagePath", AssetType.LOGO)
+            self._append_asset_if_present(game, launchbox_root, game_node, "FrontImagePath", AssetType.BOX_FRONT)
+            self._append_asset_if_present(game, launchbox_root, game_node, "BackgroundImagePath", AssetType.FANART)
+            self._append_asset_if_present(game, launchbox_root, game_node, "ScreenshotImagePath", AssetType.SCREENSHOT_GAMEPLAY)
+            self._append_asset_if_present(game, launchbox_root, game_node, "VideoPath", AssetType.VIDEO)
+            self._append_asset_if_present(game, launchbox_root, game_node, "LogoImagePath", AssetType.LOGO)
 
             games.append(game)
+            parsed += 1
+            if progress_callback is not None and parsed % 500 == 0:
+                progress_callback(f"[scan] {system.display_name}: parsed {parsed} LaunchBox entries")
+            game_node.clear()
 
         return games
 
     @staticmethod
-    def _resolve_path(path_value: str, source_root: Path) -> Path:
-        candidate = Path(path_value)
-        if candidate.is_absolute():
+    def _resolve_path(path_value: str, launchbox_root: Path) -> Path:
+        normalized = path_value.strip().strip('"')
+        if normalized.startswith(("\\", "/")):
+            return launchbox_root / normalized.lstrip("\\/")
+        candidate = Path(normalized)
+        if candidate.is_absolute() and getattr(candidate, "drive", ""):
             return candidate
-        return (source_root / "LaunchBox" / candidate).resolve()
+        parts = list(candidate.parts)
+        if parts and parts[0].lower() == "launchbox":
+            candidate = Path(*parts[1:])
+        return launchbox_root / candidate
+
+    @staticmethod
+    def _launchbox_root(source_root: Path) -> Path:
+        if (source_root / "Data" / "Platforms").exists():
+            return source_root
+        if (source_root / "LaunchBox" / "Data" / "Platforms").exists():
+            return source_root / "LaunchBox"
+        if source_root.name.lower() == "data" and (source_root / "Platforms").exists():
+            return source_root.parent
+        return source_root
 
     @staticmethod
     def _safe_text(node: ET.Element | None) -> str | None:
@@ -201,6 +238,7 @@ class LaunchBoxXmlLoader(BaseLoader):
                 file_path=resolved,
                 format=resolved.suffix.lower().lstrip(".") or None,
                 match_key="explicit_path",
+                verification_state=AssetVerificationState.UNCHECKED,
             )
         )
 

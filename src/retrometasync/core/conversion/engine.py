@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from glob import escape as glob_escape
+import os
 from pathlib import Path
 import shutil
 from typing import Callable
 
+from retrometasync.config.ecosystems import ECOSYSTEM_MEDIA_FALLBACK_FOLDERS
 from retrometasync.core.conversion.targets import TARGET_MODULES
 from retrometasync.core.conversion.writers.dat_writer import write_dat
 from retrometasync.core.conversion.writers.gamelist_xml import write_gamelist
 from retrometasync.core.conversion.writers.launchbox_xml import write_launchbox_platform_xml
-from retrometasync.core.models import AssetType, Game, Library
+from retrometasync.core.models import Asset, AssetType, AssetVerificationState, Game, Library
 
 ProgressCallback = Callable[[str], None]
 
@@ -53,6 +56,7 @@ class ConversionResult:
     games_processed: int = 0
     roms_copied: int = 0
     assets_copied: int = 0
+    assets_missing_skipped: int = 0
     files_skipped: int = 0
     files_renamed_due_to_collision: int = 0
     preflight_checks: list[str] = field(default_factory=list)
@@ -153,6 +157,9 @@ class ConversionEngine:
                         chosen_assets=chosen_assets,
                         planned_paths=planned_paths,
                         result=result,
+                        library=request.library,
+                        game=game,
+                        system_display=system_display,
                         progress=progress,
                         dry_run=request.dry_run,
                         overwrite_existing=request.overwrite_existing,
@@ -214,6 +221,7 @@ class ConversionEngine:
                 "Conversion complete."
                 f" systems={result.systems_processed}, games={result.games_processed},"
                 f" roms={result.roms_copied}, assets={result.assets_copied},"
+                f" assets_missing={result.assets_missing_skipped},"
                 f" skipped={result.files_skipped}, renamed={result.files_renamed_due_to_collision}"
             ),
         )
@@ -221,22 +229,48 @@ class ConversionEngine:
 
     def _copy_assets(
         self,
-        chosen_assets: dict[str, Path],
+        chosen_assets: dict[str, Asset],
         planned_paths: dict[str, Path],
         result: ConversionResult,
+        library: Library,
+        game: Game,
+        system_display: str,
         progress: ProgressCallback | None,
         dry_run: bool,
         overwrite_existing: bool,
     ) -> dict[str, Path]:
         copied: dict[str, Path] = {}
-        for key, source in chosen_assets.items():
+        candidate_keys = set(chosen_assets.keys())
+        candidate_keys.update(_candidate_asset_keys_for_ecosystem(library.detected_ecosystem or ""))
+
+        for key in candidate_keys:
             if key not in planned_paths:
                 continue
-            if not source.exists():
-                warning = f"Asset source missing [{key}]: {source}"
-                result.warnings.append(warning)
-                self._log(progress, f"[warn] {warning}")
-                continue
+            asset = chosen_assets.get(key)
+            source = asset.file_path if asset is not None else None
+            if source is None or not source.exists():
+                fallback_source = _lookup_asset_fallback(
+                    key=key,
+                    library=library,
+                    game=game,
+                    system_display=system_display,
+                )
+                if fallback_source is not None:
+                    source = fallback_source
+                    if asset is not None:
+                        asset.file_path = fallback_source
+                    self._log(progress, f"[scan] launchbox media fallback matched [{key}] -> {fallback_source}")
+                else:
+                    if asset is not None:
+                        asset.verification_state = AssetVerificationState.VERIFIED_MISSING
+                    result.files_skipped += 1
+                    result.assets_missing_skipped += 1
+                    warning = f"asset missing -> skipped [{key}]: {source or '(no metadata path)'}"
+                    result.warnings.append(warning)
+                    self._log(progress, f"[warn] {warning}")
+                    continue
+            if asset is not None:
+                asset.verification_state = AssetVerificationState.VERIFIED_EXISTS
 
             destination_base = planned_paths[key]
             candidate_destination = destination_base.with_suffix(source.suffix.lower())
@@ -259,13 +293,13 @@ class ConversionEngine:
                 result.warnings.append(f"Long path risk on Windows: {destination}")
 
             if dry_run:
-                self._log(progress, f"[dry-run] Would copy asset [{key}] -> {destination}")
+                self._log(progress, f"[dry-run] asset copied [{key}] -> {destination}")
             else:
                 _copy_file(source, destination)
             copied[key] = destination
             result.assets_copied += 1
             if not dry_run:
-                self._log(progress, f"Copied asset [{key}] -> {destination}")
+                self._log(progress, f"asset copied [{key}] -> {destination}")
         return copied
 
     @staticmethod
@@ -377,30 +411,243 @@ def _build_launchbox_entry(
     return entry
 
 
-def _pick_assets(game: Game) -> dict[str, Path]:
+def _pick_assets(game: Game) -> dict[str, Asset]:
     """Select one representative source file per output slot.
 
     Priority is deterministic: first matching asset in the original list wins.
     """
-    chosen: dict[str, Path] = {}
+    chosen: dict[str, Asset] = {}
 
     for asset in game.assets:
         if "image" not in chosen and asset.asset_type in IMAGE_TYPES:
-            chosen["image"] = asset.file_path
+            chosen["image"] = asset
         if "thumbnail" not in chosen and asset.asset_type in (AssetType.SCREENSHOT_GAMEPLAY, AssetType.SCREENSHOT_TITLE):
-            chosen["thumbnail"] = asset.file_path
+            chosen["thumbnail"] = asset
         if "marquee" not in chosen and asset.asset_type in MARQUEE_TYPES:
-            chosen["marquee"] = asset.file_path
+            chosen["marquee"] = asset
         if "video" not in chosen and asset.asset_type == AssetType.VIDEO:
-            chosen["video"] = asset.file_path
+            chosen["video"] = asset
         if "manual" not in chosen and asset.asset_type == AssetType.MANUAL:
-            chosen["manual"] = asset.file_path
+            chosen["manual"] = asset
         if "bezel" not in chosen and asset.asset_type == AssetType.BEZEL:
-            chosen["bezel"] = asset.file_path
+            chosen["bezel"] = asset
         if "fanart" not in chosen and asset.asset_type in FANART_TYPES:
-            chosen["fanart"] = asset.file_path
+            chosen["fanart"] = asset
 
     return chosen
+
+
+def _lookup_asset_fallback(
+    key: str,
+    library: Library,
+    game: Game,
+    system_display: str,
+) -> Path | None:
+    ecosystem = (library.detected_ecosystem or "").lower()
+    if ecosystem == "launchbox":
+        return _lookup_launchbox_asset_fallback(key=key, library=library, game=game, system_display=system_display)
+    return _lookup_generic_asset_fallback(
+        key=key,
+        ecosystem=ecosystem,
+        library=library,
+        game=game,
+        system_display=system_display,
+    )
+
+
+def _lookup_launchbox_asset_fallback(
+    key: str,
+    library: Library,
+    game: Game,
+    system_display: str,
+) -> Path | None:
+    """Resolve LaunchBox media by convention for selected games.
+
+    This runs only when the metadata path is missing and only for selected games,
+    so we avoid full-library media scans during analysis.
+    """
+    if (library.detected_ecosystem or "").lower() != "launchbox":
+        return None
+    launchbox_root = library.source_root
+    if (launchbox_root / "Data" / "Platforms").exists():
+        pass
+    elif launchbox_root.name.lower() == "data" and (launchbox_root / "Platforms").exists():
+        launchbox_root = launchbox_root.parent
+    elif (launchbox_root / "LaunchBox" / "Data" / "Platforms").exists():
+        launchbox_root = launchbox_root / "LaunchBox"
+
+    search_roots = _launchbox_media_roots_for_key(launchbox_root, system_display, game.system_id, key)
+    if not search_roots:
+        return None
+
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for base_name in _candidate_base_names(game):
+            pattern = f"{glob_escape(base_name)}*"
+            for match in sorted(root.glob(pattern)):
+                if not match.is_file():
+                    continue
+                return match
+    return None
+
+
+def _lookup_generic_asset_fallback(
+    key: str,
+    ecosystem: str,
+    library: Library,
+    game: Game,
+    system_display: str,
+) -> Path | None:
+    fallback_key = _ecosystem_fallback_key(ecosystem)
+    folder_templates = ECOSYSTEM_MEDIA_FALLBACK_FOLDERS.get(fallback_key, {}).get(key)
+    if not folder_templates:
+        return None
+
+    search_roots = _generic_media_roots(
+        folder_templates=folder_templates,
+        fallback_key=fallback_key,
+        library=library,
+        game=game,
+        system_display=system_display,
+    )
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for base_name in _candidate_base_names(game):
+            pattern = f"{glob_escape(base_name)}*"
+            for match in sorted(root.glob(pattern)):
+                if match.is_file():
+                    return match
+    return None
+
+
+def _launchbox_media_roots_for_key(launchbox_root: Path, system_display: str, system_id: str, key: str) -> list[Path]:
+    platform_candidates = _launchbox_platform_candidates(system_display, system_id)
+    image_roots = [launchbox_root / "Images" / platform for platform in platform_candidates]
+    video_roots = [launchbox_root / "Videos" / platform for platform in platform_candidates]
+    manual_roots = [launchbox_root / "Manuals" / platform for platform in platform_candidates]
+    image_primary_folders = [
+        "Box - Front",
+        "Box - Front - Reconstructed",
+        "Box - 3D",
+        "Cart - Front",
+        "Cart - Back",
+        "Cart - 3D",
+        "Disc",
+    ]
+    screenshot_folders = [
+        "Screenshot - Gameplay",
+        "Screenshot - Game Title",
+        "Screenshot - High Scores",
+        "Screenshot - Game Over",
+        "Screenshot - Game Select",
+    ]
+    marquee_folders = [
+        "Clear Logo",
+        "Arcade - Marquee",
+        "Banner",
+        "Steam Banner",
+    ]
+    fanart_folders = [
+        "Fanart - Background",
+        "Fanart - Box - Front",
+        "Fanart - Box - Back",
+        "Fanart - Cart - Front",
+        "Fanart - Cart - Back",
+        "Fanart - Disc",
+    ]
+    if key == "image":
+        return [root / folder for root in image_roots for folder in (image_primary_folders + screenshot_folders)]
+    if key == "thumbnail":
+        return [root / folder for root in image_roots for folder in screenshot_folders]
+    if key == "marquee":
+        return [root / folder for root in image_roots for folder in marquee_folders]
+    if key == "fanart":
+        return [root / folder for root in image_roots for folder in fanart_folders]
+    if key == "video":
+        return video_roots
+    if key == "manual":
+        return manual_roots + [launchbox_root / "Manuals"]
+    return []
+
+
+def _launchbox_platform_candidates(system_display: str, system_id: str) -> list[str]:
+    candidates: list[str] = []
+    for value in (
+        system_display,
+        system_display.replace("_", " "),
+        system_id,
+        system_id.replace("_", " "),
+    ):
+        cleaned = value.strip()
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+    return candidates
+
+
+def _candidate_asset_keys_for_ecosystem(ecosystem: str) -> set[str]:
+    if ecosystem == "launchbox":
+        return {"image", "thumbnail", "video", "manual", "marquee", "fanart"}
+    if ecosystem in {"es_classic", "batocera", "knulli", "amberelec", "jelos_rocknix", "arkos", "retrobat"}:
+        return {"image", "thumbnail", "video", "manual", "marquee", "fanart"}
+    if ecosystem in {"es_de", "emudeck", "retrodeck"}:
+        return {"image", "thumbnail", "video", "manual", "marquee", "fanart"}
+    if ecosystem in {"retroarch", "onionos", "muos"}:
+        return {"image", "thumbnail", "video"}
+    return set()
+
+
+def _ecosystem_fallback_key(ecosystem: str) -> str:
+    if ecosystem in {"es_classic", "batocera", "knulli", "amberelec", "jelos_rocknix", "arkos", "retrobat"}:
+        return "es_family"
+    if ecosystem in {"es_de", "emudeck", "retrodeck"}:
+        return "es_de"
+    if ecosystem in {"retroarch", "onionos", "muos"}:
+        return ecosystem
+    return ecosystem
+
+
+def _candidate_base_names(game: Game) -> list[str]:
+    values: list[str] = []
+    for value in (game.title, game.rom_basename):
+        normalized = value.strip() if value else ""
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return values
+
+
+def _generic_media_roots(
+    folder_templates: tuple[str, ...],
+    fallback_key: str,
+    library: Library,
+    game: Game,
+    system_display: str,
+) -> list[Path]:
+    roots: list[Path] = []
+    source_root = library.source_root
+    system_candidates = _launchbox_platform_candidates(system_display, game.system_id)
+    for template in folder_templates:
+        if "{system}" in template:
+            for system_candidate in system_candidates:
+                roots.append(source_root / template.format(system=system_candidate))
+        elif fallback_key == "es_family":
+            for ancestor in [game.rom_path.parent, game.rom_path.parent.parent, source_root]:
+                if ancestor is None:
+                    continue
+                roots.append(ancestor / template)
+        else:
+            roots.append(source_root / template)
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = root.as_posix().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(root)
+    return unique
 
 
 def _copy_file(source: Path, destination: Path) -> None:
@@ -423,11 +670,11 @@ def _safe_stem(value: str) -> str:
 
 def _relative_for_es(target_path: Path, base_dir: Path) -> str:
     try:
-        relative = target_path.relative_to(base_dir).as_posix()
+        relative = os.path.relpath(target_path, base_dir).replace("\\", "/")
     except ValueError:
         # Cross-drive paths on Windows cannot always be relativized.
         return target_path.as_posix()
-    if relative.startswith("./"):
+    if relative.startswith("./") or relative.startswith("../"):
         return relative
     return f"./{relative}"
 

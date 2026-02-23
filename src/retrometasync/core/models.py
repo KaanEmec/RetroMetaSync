@@ -38,12 +38,19 @@ class MetadataSource(str, Enum):
     DAT_XML = "dat_xml"
 
 
+class AssetVerificationState(str, Enum):
+    UNCHECKED = "unchecked"
+    VERIFIED_EXISTS = "verified_exists"
+    VERIFIED_MISSING = "verified_missing"
+
+
 @dataclass(slots=True)
 class Asset:
     asset_type: AssetType
     file_path: Path
     format: str | None = None
     match_key: str | None = None
+    verification_state: AssetVerificationState = AssetVerificationState.UNCHECKED
 
 
 @dataclass(slots=True)

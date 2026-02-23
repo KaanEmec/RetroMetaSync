@@ -89,3 +89,36 @@ MUOS_FOLDER_TO_ASSET_TYPE: dict[str, AssetType] = {
     "box": AssetType.BOX_FRONT,
     "preview": AssetType.SCREENSHOT_GAMEPLAY,
 }
+
+
+# Conversion-time fallback media roots by ecosystem and output slot key.
+ECOSYSTEM_MEDIA_FALLBACK_FOLDERS: dict[str, dict[str, tuple[str, ...]]] = {
+    "es_family": {
+        "image": ("images", "downloaded_images", "covers", "boxart"),
+        "thumbnail": ("images", "screenshots", "snaps"),
+        "marquee": ("images", "marquees", "wheel"),
+        "fanart": ("images", "fanart"),
+        "video": ("videos", "downloaded_videos"),
+        "manual": ("manuals",),
+    },
+    "es_de": {
+        "image": ("ES-DE/downloaded_media/{system}/covers", "ES-DE/downloaded_media/{system}/3dboxes"),
+        "thumbnail": ("ES-DE/downloaded_media/{system}/screenshots", "ES-DE/downloaded_media/{system}/titlescreens"),
+        "marquee": ("ES-DE/downloaded_media/{system}/marquees",),
+        "fanart": ("ES-DE/downloaded_media/{system}/fanart",),
+        "video": ("ES-DE/downloaded_media/{system}/videos",),
+        "manual": ("ES-DE/downloaded_media/{system}/manuals",),
+    },
+    "retroarch": {
+        "image": ("thumbnails/{system}/Named_Boxarts",),
+        "thumbnail": ("thumbnails/{system}/Named_Snaps", "thumbnails/{system}/Named_Titles"),
+    },
+    "onionos": {
+        "image": ("Roms/{system}/Imgs", "Roms/{system}/imgs"),
+        "thumbnail": ("Roms/{system}/Imgs", "Roms/{system}/imgs"),
+    },
+    "muos": {
+        "image": ("MUOS/info/catalogue/{system}/box",),
+        "thumbnail": ("MUOS/info/catalogue/{system}/preview",),
+    },
+}

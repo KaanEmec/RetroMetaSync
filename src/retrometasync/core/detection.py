@@ -102,6 +102,7 @@ class _ScanFacts:
     has_onion_imgs_dir: bool = False
     has_batocera_suffix_media: bool = False
     has_retrobat_deep_images: bool = False
+    launchbox_root: Path | None = None
 
 
 class LibraryDetector:
@@ -109,14 +110,73 @@ class LibraryDetector:
 
     def __init__(self) -> None:
         self._progress_callback = None
+        self._has_any_cache: dict[tuple[str, str], bool] = {}
+        self._has_dir_named_cache: dict[tuple[str, str], bool] = {}
+        self._system_dir_scan_cache: dict[str, bool] = {}
 
     def detect(
         self,
         source_root: Path,
         progress_callback: Callable[[str], None] | None = None,
+        preferred_ecosystem: str | None = None,
     ) -> DetectionResult:
         self._progress_callback = progress_callback
-        root = source_root.expanduser().resolve()
+        self._has_any_cache.clear()
+        self._has_dir_named_cache.clear()
+        self._system_dir_scan_cache.clear()
+        selected_root = source_root.expanduser().resolve()
+        preferred = (preferred_ecosystem or "").strip().lower() or None
+
+        preferred_result = self._detect_from_preference(selected_root, preferred)
+        if preferred_result is not None:
+            self._emit(progress_callback, f"[detect] Preferred source mode '{preferred}' accepted.")
+            return preferred_result
+
+        launchbox_root = self._launchbox_root_from_selected(selected_root)
+        # If caller explicitly picks LaunchBox mode, trust that hint and bypass heavy generic probing.
+        if preferred_ecosystem == "launchbox" and launchbox_root is not None:
+            root = launchbox_root
+            self._emit(progress_callback, f"[detect] LaunchBox mode enabled. Using root: {root}")
+            facts = _ScanFacts(
+                has_launchbox_platforms=True,
+                has_launchbox_images=self._path_exists(root / "Images"),
+                launchbox_root=root,
+            )
+            scores = {ecosystem: 0.0 for ecosystem in ECOSYSTEMS}
+            scores["launchbox"] = 10.0
+            ecosystem = "launchbox"
+            family = self._family_for_ecosystem(ecosystem)
+            confidence = 1.0
+            systems = self._enumerate_systems(root, ecosystem, facts)
+            warnings = self._build_warnings(facts, ecosystem)
+            return DetectionResult(
+                source_root=root,
+                detected_ecosystem=ecosystem,
+                detected_family=family,
+                confidence=confidence,
+                ecosystem_scores=scores,
+                systems=systems,
+                warnings=warnings,
+            )
+
+        root = launchbox_root or selected_root
+        quick_result = self._auto_fast_detect(root)
+        if quick_result is not None:
+            ecosystem, quick_facts = quick_result
+            self._emit(progress_callback, f"[detect] Fast-path ecosystem match: {ecosystem}")
+            scores = {name: 0.0 for name in ECOSYSTEMS}
+            scores[ecosystem] = 10.0
+            systems = self._enumerate_systems(root, ecosystem, quick_facts)
+            return DetectionResult(
+                source_root=root,
+                detected_ecosystem=ecosystem,
+                detected_family=self._family_for_ecosystem(ecosystem),
+                confidence=1.0,
+                ecosystem_scores=scores,
+                systems=systems,
+                warnings=self._build_warnings(quick_facts, ecosystem),
+            )
+
         self._emit(progress_callback, f"[detect] Scanning root: {root}")
         facts = self._scan_facts(root)
         scores = self._score_ecosystems(root, facts)
@@ -143,20 +203,28 @@ class LibraryDetector:
     def _scan_facts(self, root: Path) -> _ScanFacts:
         facts = _ScanFacts()
 
+        # LaunchBox fast-path: avoid deep recursive scans for huge NAS roots.
+        launchbox_root = self._launchbox_root_from_selected(root)
+        if launchbox_root is not None:
+            facts.has_launchbox_platforms = True
+            facts.has_launchbox_images = self._path_exists(launchbox_root / "Images")
+            facts.launchbox_root = launchbox_root
+            return facts
+
+        # Cheap top-level checks first.
+        facts.has_romlists_dir = self._path_exists(root / "romlists")
+        facts.has_es_de_gamelists = self._path_exists(root / "ES-DE" / "gamelists")
+        facts.has_es_de_downloaded_media = self._path_exists(root / "ES-DE" / "downloaded_media")
+        facts.has_muos_catalogue = self._path_exists(root / "MUOS" / "info" / "catalogue")
+        facts.has_emulationstation_home = self._path_exists(root / ".emulationstation")
+        facts.has_userdata_roms = self._path_exists(root / "userdata" / "roms")
+
         facts.has_lpl = self._has_any(root, "*.lpl")
         facts.has_pegasus_metadata = self._has_any(root, "metadata.pegasus.txt")
         facts.has_attract_cfg = self._has_any(root, "attract.cfg")
-        facts.has_romlists_dir = self._path_exists(root / "romlists")
-        facts.has_launchbox_platforms = self._path_exists(root / "LaunchBox" / "Data" / "Platforms")
-        facts.has_launchbox_images = self._path_exists(root / "LaunchBox" / "Images")
-        facts.has_es_de_gamelists = self._path_exists(root / "ES-DE" / "gamelists")
-        facts.has_es_de_downloaded_media = self._path_exists(root / "ES-DE" / "downloaded_media")
         facts.has_retrobat_ini = self._has_any(root, "retrobat.ini")
         facts.has_miyoo_gamelist = self._has_any(root, "miyoogamelist.xml")
-        facts.has_muos_catalogue = self._path_exists(root / "MUOS" / "info" / "catalogue")
         facts.has_gamelist_xml = self._has_any(root, "gamelist.xml")
-        facts.has_emulationstation_home = self._path_exists(root / ".emulationstation")
-        facts.has_userdata_roms = self._path_exists(root / "userdata" / "roms")
         facts.has_onion_imgs_dir = self._path_exists(root / "Roms") and self._has_dir_named(root / "Roms", "Imgs")
         facts.has_batocera_suffix_media = self._has_any(root, "*-image.png") or self._has_any(
             root, "*-marquee.png"
@@ -167,11 +235,103 @@ class LibraryDetector:
 
         return facts
 
+    def _detect_from_preference(self, selected_root: Path, preferred_ecosystem: str | None) -> DetectionResult | None:
+        if preferred_ecosystem is None:
+            return None
+        if preferred_ecosystem == "launchbox":
+            root = self._launchbox_root_from_selected(selected_root)
+            if root is None:
+                return None
+            facts = _ScanFacts(
+                has_launchbox_platforms=True,
+                has_launchbox_images=self._path_exists(root / "Images"),
+                launchbox_root=root,
+            )
+            return self._preferred_detection_result(root, "launchbox", facts)
+
+        preferred_map: dict[str, str] = {
+            "es family": "es_classic",
+            "es_family": "es_classic",
+            "es_family (gamelist)": "es_classic",
+            "es_de": "es_de",
+            "retrobat": "retrobat",
+            "retroarch": "retroarch",
+            "retroarch/playlist": "retroarch",
+            "attractmode": "attract_mode",
+            "attract_mode": "attract_mode",
+            "pegasus": "pegasus",
+            "onionos": "onionos",
+            "muos": "muos",
+        }
+        target_ecosystem = preferred_map.get(preferred_ecosystem, preferred_ecosystem)
+        if not self._preferred_hint_matches(selected_root, target_ecosystem):
+            return None
+        facts = self._scan_facts(selected_root)
+        return self._preferred_detection_result(selected_root, target_ecosystem, facts)
+
+    def _preferred_detection_result(self, root: Path, ecosystem: str, facts: _ScanFacts) -> DetectionResult:
+        scores = {name: 0.0 for name in ECOSYSTEMS}
+        if ecosystem in scores:
+            scores[ecosystem] = 10.0
+        systems = self._enumerate_systems(root, ecosystem, facts)
+        return DetectionResult(
+            source_root=root,
+            detected_ecosystem=ecosystem,
+            detected_family=self._family_for_ecosystem(ecosystem),
+            confidence=1.0,
+            ecosystem_scores=scores,
+            systems=systems,
+            warnings=self._build_warnings(facts, ecosystem),
+        )
+
+    def _preferred_hint_matches(self, root: Path, ecosystem: str) -> bool:
+        if ecosystem == "es_de":
+            return self._path_exists(root / "ES-DE" / "gamelists")
+        if ecosystem == "retrobat":
+            return self._path_exists(root / "retrobat.ini")
+        if ecosystem == "retroarch":
+            return self._has_any(root, "*.lpl")
+        if ecosystem == "attract_mode":
+            return self._path_exists(root / "romlists") and self._path_exists(root / "attract.cfg")
+        if ecosystem == "pegasus":
+            return self._has_any(root, "metadata.pegasus.txt")
+        if ecosystem == "onionos":
+            return self._path_exists(root / "Roms")
+        if ecosystem == "muos":
+            return self._path_exists(root / "MUOS" / "info" / "catalogue")
+        if ecosystem == "es_classic":
+            return (
+                self._path_exists(root / "roms")
+                or self._path_exists(root / ".emulationstation")
+                or self._has_any(root, "gamelist.xml")
+            )
+        return False
+
+    def _auto_fast_detect(self, root: Path) -> tuple[str, _ScanFacts] | None:
+        if self._path_exists(root / "ES-DE" / "gamelists") and self._path_exists(root / "ES-DE" / "downloaded_media"):
+            return "es_de", _ScanFacts(has_es_de_gamelists=True, has_es_de_downloaded_media=True)
+        if self._path_exists(root / "MUOS" / "info" / "catalogue"):
+            return "muos", _ScanFacts(has_muos_catalogue=True)
+        if self._path_exists(root / "romlists") and self._path_exists(root / "attract.cfg"):
+            return "attract_mode", _ScanFacts(has_attract_cfg=True, has_romlists_dir=True)
+        if self._path_exists(root / "retrobat.ini"):
+            return "retrobat", _ScanFacts(has_retrobat_ini=True)
+        if self._path_exists(root / "Roms") and self._has_any(root / "Roms", "miyoogamelist.xml"):
+            return "onionos", _ScanFacts(has_miyoo_gamelist=True, has_onion_imgs_dir=True)
+        if self._has_any(root, "metadata.pegasus.txt"):
+            return "pegasus", _ScanFacts(has_pegasus_metadata=True)
+        if self._has_any(root, "*.lpl"):
+            return "retroarch", _ScanFacts(has_lpl=True)
+        return None
+
     def _score_ecosystems(self, root: Path, facts: _ScanFacts) -> dict[str, float]:
         scores = {ecosystem: 0.0 for ecosystem in ECOSYSTEMS}
 
+        # Avoid duplicate expensive recursive checks here by only evaluating cheap path hints.
         for ecosystem, hints in SIGNATURE_HINTS.items():
             for hint in hints:
+                if "/" not in hint:
+                    continue
                 if self._hint_matches(root, hint):
                     scores[ecosystem] += 1.0
 
@@ -292,7 +452,7 @@ class LibraryDetector:
         systems: list[System] = []
         seen_ids: set[str] = set()
 
-        gamelist_files = list(root.rglob("gamelist.xml"))
+        gamelist_files = self._collect_matches(root, "gamelist.xml", max_results=6000)
         if gamelist_files:
             self._emit(self._progress_callback, f"[detect] Found {len(gamelist_files)} gamelist.xml files.")
         for gamelist_path in gamelist_files:
@@ -383,8 +543,11 @@ class LibraryDetector:
 
     def _systems_from_launchbox(self, root: Path) -> list[System]:
         systems: list[System] = []
-        platforms_root = root / "LaunchBox" / "Data" / "Platforms"
-        if not platforms_root.exists():
+        launchbox_root = self._launchbox_root_from_selected(root)
+        if launchbox_root is None:
+            return systems
+        platforms_root = launchbox_root / "Data" / "Platforms"
+        if not platforms_root.exists() or not platforms_root.is_dir():
             return systems
 
         for xml_path in sorted(platforms_root.glob("*.xml")):
@@ -393,7 +556,7 @@ class LibraryDetector:
                 System(
                     system_id=system_name.lower().replace(" ", "_"),
                     display_name=system_name,
-                    rom_root=root / "LaunchBox",
+                    rom_root=launchbox_root,
                     metadata_source=MetadataSource.LAUNCHBOX_XML,
                     metadata_paths=[xml_path],
                     detected_ecosystem="launchbox",
@@ -403,7 +566,7 @@ class LibraryDetector:
 
     def _systems_from_retroarch(self, root: Path) -> list[System]:
         systems: list[System] = []
-        for lpl_path in sorted(root.rglob("*.lpl")):
+        for lpl_path in self._collect_matches(root, "*.lpl", max_results=3000):
             system_name = lpl_path.stem
             systems.append(
                 System(
@@ -478,7 +641,7 @@ class LibraryDetector:
 
     def _systems_from_pegasus(self, root: Path) -> list[System]:
         systems: list[System] = []
-        for metadata_file in sorted(root.rglob("metadata.pegasus.txt")):
+        for metadata_file in self._collect_matches(root, "metadata.pegasus.txt", max_results=3000):
             system_dir = metadata_file.parent
             systems.append(
                 System(
@@ -505,15 +668,37 @@ class LibraryDetector:
         return path.exists()
 
     @staticmethod
-    def _has_any(root: Path, pattern: str) -> bool:
-        return next(root.rglob(pattern), None) is not None
+    def _launchbox_root_from_selected(selected_root: Path) -> Path | None:
+        """Resolve selected path to LaunchBox root for root/Data/parent-of-LaunchBox inputs."""
+        # Case: user selected parent folder that contains LaunchBox/
+        if (selected_root / "LaunchBox" / "Data" / "Platforms").exists():
+            return selected_root / "LaunchBox"
+        # Case: user selected LaunchBox root directly
+        if (selected_root / "Data" / "Platforms").exists():
+            return selected_root
+        # Case: user selected LaunchBox/Data directly
+        if selected_root.name.lower() == "data" and (selected_root / "Platforms").exists():
+            return selected_root.parent
+        return None
 
-    @staticmethod
-    def _has_dir_named(root: Path, directory_name: str) -> bool:
+    def _has_any(self, root: Path, pattern: str) -> bool:
+        cache_key = (root.resolve().as_posix().lower(), pattern)
+        if cache_key in self._has_any_cache:
+            return self._has_any_cache[cache_key]
+        value = next(root.rglob(pattern), None) is not None
+        self._has_any_cache[cache_key] = value
+        return value
+
+    def _has_dir_named(self, root: Path, directory_name: str) -> bool:
+        cache_key = (root.resolve().as_posix().lower(), directory_name.lower())
+        if cache_key in self._has_dir_named_cache:
+            return self._has_dir_named_cache[cache_key]
         directory_name = directory_name.lower()
         for path in root.rglob("*"):
             if path.is_dir() and path.name.lower() == directory_name:
+                self._has_dir_named_cache[cache_key] = True
                 return True
+        self._has_dir_named_cache[cache_key] = False
         return False
 
     def _hint_matches(self, root: Path, hint: str) -> bool:
@@ -542,13 +727,33 @@ class LibraryDetector:
         return unique
 
     def _looks_like_system_dir(self, path: Path) -> bool:
+        cache_key = path.resolve().as_posix().lower()
+        if cache_key in self._system_dir_scan_cache:
+            return self._system_dir_scan_cache[cache_key]
         if (path / "gamelist.xml").exists():
+            self._system_dir_scan_cache[cache_key] = True
             return True
         if path.name.lower() in ASSET_DIRECTORY_HINTS:
+            self._system_dir_scan_cache[cache_key] = False
             return False
+        file_budget = 2500
+        scanned = 0
         for file_path in path.rglob("*"):
             if not file_path.is_file():
                 continue
+            scanned += 1
             if file_path.suffix.lower() in ROM_EXTENSIONS:
+                self._system_dir_scan_cache[cache_key] = True
                 return True
+            if scanned >= file_budget:
+                break
+        self._system_dir_scan_cache[cache_key] = False
         return False
+
+    def _collect_matches(self, root: Path, pattern: str, max_results: int) -> list[Path]:
+        results: list[Path] = []
+        for path in root.rglob(pattern):
+            results.append(path)
+            if len(results) >= max_results:
+                break
+        return sorted(results)

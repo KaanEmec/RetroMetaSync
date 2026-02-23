@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from queue import Empty, Queue
 import threading
+import time
 import tkinter.filedialog as filedialog
 
 import customtkinter as ctk
@@ -38,6 +39,9 @@ class MainWindow(ctk.CTk):
         self.current_library: Library | None = None
         self._analysis_running = False
         self._conversion_running = False
+        self._progress_lock = threading.Lock()
+        self._last_progress_emit: dict[str, float] = {"analysis": 0.0, "conversion": 0.0}
+        self._progress_emit_interval_sec = 0.15
 
         self._build_layout()
         self.after(100, self._poll_queue)
@@ -94,6 +98,26 @@ class MainWindow(ctk.CTk):
         self.analyze_button = ctk.CTkButton(source_frame, text="🔍 Analyze Library", command=self._on_analyze)
         self.analyze_button.grid(row=0, column=3, padx=(0, 10), pady=10)
 
+        self.source_mode_var = ctk.StringVar(value="Auto Detect")
+        self.source_mode_menu = ctk.CTkOptionMenu(
+            source_frame,
+            values=[
+                "Auto Detect",
+                "LaunchBox (Root/Data)",
+                "ES Family (gamelist)",
+                "ES-DE",
+                "RetroBat",
+                "RetroArch/Playlist",
+                "AttractMode",
+                "Pegasus",
+                "OnionOS",
+                "muOS",
+            ],
+            variable=self.source_mode_var,
+            width=170,
+        )
+        self.source_mode_menu.grid(row=0, column=4, padx=(0, 10), pady=10, sticky="e")
+
         self.status_label = ctk.CTkLabel(
             self,
             text="Select a source folder and run analysis.",
@@ -125,6 +149,8 @@ class MainWindow(ctk.CTk):
             return
 
         self.progress_log.clear()
+        with self._progress_lock:
+            self._last_progress_emit["analysis"] = 0.0
         self.progress_log.log(f"Analyzing: {source_path}")
         self._set_status("Running detection and metadata normalization...")
         self._set_global_busy(True)
@@ -134,20 +160,30 @@ class MainWindow(ctk.CTk):
         self.library_view.reset()
         self.game_list.reset()
         self.game_list.set_enabled(False)
+        preferred_ecosystem = self._preferred_ecosystem_from_ui(self.source_mode_var.get())
 
-        worker = threading.Thread(target=self._analyze_worker, args=(source_path,), daemon=True)
+        worker = threading.Thread(
+            target=self._analyze_worker,
+            args=(source_path, preferred_ecosystem),
+            daemon=True,
+        )
         worker.start()
 
-    def _analyze_worker(self, source_path: Path) -> None:
+    def _analyze_worker(self, source_path: Path, preferred_ecosystem: str | None) -> None:
         try:
+            self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:start")
             detection_result = self.detector.detect(
                 source_path,
-                progress_callback=lambda line: self.result_queue.put(("analysis_progress", line)),
+                progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
+                preferred_ecosystem=preferred_ecosystem,
             )
+            self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:done")
+            self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:start")
             normalization_result = self.normalizer.normalize(
                 detection_result,
-                progress_callback=lambda line: self.result_queue.put(("analysis_progress", line)),
+                progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
             )
+            self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:done")
             self.result_queue.put(("analysis_complete", (detection_result, normalization_result)))
         except Exception as exc:  # noqa: BLE001
             self.result_queue.put(("analysis_error", str(exc)))
@@ -185,7 +221,7 @@ class MainWindow(ctk.CTk):
         def deferred_game_list() -> None:
             self.game_list.set_library(
                 library,
-                progress_callback=lambda msg: self.result_queue.put(("analysis_progress", msg)),
+                progress_callback=lambda msg: self._enqueue_progress("analysis", "analysis_progress", msg),
             )
         self.after(0, deferred_game_list)
 
@@ -248,6 +284,8 @@ class MainWindow(ctk.CTk):
         self.convert_pane.set_busy(True)
         self._set_global_busy(True)
         self.game_list.set_enabled(False)
+        with self._progress_lock:
+            self._last_progress_emit["conversion"] = 0.0
         self.progress_log.log(
             f"Starting conversion: target={target}, games={selected_count}, output={output_root.as_posix()}"
         )
@@ -267,7 +305,10 @@ class MainWindow(ctk.CTk):
 
     def _convert_worker(self, request: ConversionRequest) -> None:
         try:
-            result = self.converter.convert(request, progress=lambda line: self.result_queue.put(("conversion_progress", line)))
+            result = self.converter.convert(
+                request,
+                progress=lambda line: self._enqueue_progress("conversion", "conversion_progress", line),
+            )
             self.result_queue.put(("conversion_complete", result))
         except Exception as exc:  # noqa: BLE001
             self.result_queue.put(("conversion_error", str(exc)))
@@ -303,3 +344,28 @@ class MainWindow(ctk.CTk):
         self.analyze_button.configure(state=state)
         self.browse_button.configure(state=state)
         self.source_entry.configure(state=state)
+        self.source_mode_menu.configure(state=state)
+
+    def _enqueue_progress(self, channel: str, event_type: str, message: str) -> None:
+        now = time.monotonic()
+        with self._progress_lock:
+            last = self._last_progress_emit.get(channel, 0.0)
+            if not message.startswith("[stage]") and now - last < self._progress_emit_interval_sec:
+                return
+            self._last_progress_emit[channel] = now
+        self.result_queue.put((event_type, message))
+
+    @staticmethod
+    def _preferred_ecosystem_from_ui(selection: str) -> str | None:
+        mapping = {
+            "LaunchBox (Root/Data)": "launchbox",
+            "ES Family (gamelist)": "es_family",
+            "ES-DE": "es_de",
+            "RetroBat": "retrobat",
+            "RetroArch/Playlist": "retroarch",
+            "AttractMode": "attract_mode",
+            "Pegasus": "pegasus",
+            "OnionOS": "onionos",
+            "muOS": "muos",
+        }
+        return mapping.get(selection)

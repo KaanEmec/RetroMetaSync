@@ -83,12 +83,14 @@ ASSET_DIRECTORY_HINTS: set[str] = {
 
 class ESGamelistLoader(BaseLoader):
     ecosystem = "es_family"
+    QUICK_SCAN_ROM_LIMIT = 60000
 
     def load(self, load_input: LoaderInput) -> LoaderResult:
         systems = list(load_input.systems)
         warnings: list[str] = []
         games_by_system: dict[str, list[Game]] = {}
         progress = load_input.progress_callback
+        quick_mode = load_input.scan_mode != "deep"
 
         if not systems:
             systems = self._discover_systems(load_input.source_root)
@@ -106,14 +108,26 @@ class ESGamelistLoader(BaseLoader):
                     games_by_system[system.system_id] = self._parse_gamelist(
                         system,
                         gamelist_path,
+                        quick_mode=quick_mode,
+                        max_asset_index_files=load_input.max_asset_index_files,
                         progress_callback=progress,
                     )
                 except ET.ParseError as exc:
                     warnings.append(f"Failed to parse {gamelist_path}: {exc}")
-                    games_by_system[system.system_id] = self._scan_games_without_metadata(system, progress_callback=progress)
+                    games_by_system[system.system_id] = self._scan_games_without_metadata(
+                        system,
+                        include_assets=not quick_mode,
+                        max_asset_index_files=load_input.max_asset_index_files,
+                        progress_callback=progress,
+                    )
             else:
                 warnings.append(f"Missing gamelist.xml for system '{system.system_id}'. Falling back to file scan.")
-                games_by_system[system.system_id] = self._scan_games_without_metadata(system, progress_callback=progress)
+                games_by_system[system.system_id] = self._scan_games_without_metadata(
+                    system,
+                    include_assets=not quick_mode,
+                    max_asset_index_files=load_input.max_asset_index_files,
+                    progress_callback=progress,
+                )
 
         return LoaderResult(systems=systems, games_by_system=games_by_system, warnings=warnings)
 
@@ -121,7 +135,7 @@ class ESGamelistLoader(BaseLoader):
         systems: list[System] = []
         seen: set[str] = set()
 
-        for gamelist_path in source_root.rglob("gamelist.xml"):
+        for gamelist_path in self._collect_matches(source_root, "gamelist.xml", max_results=6000):
             system_dir = gamelist_path.parent
             system_id = system_dir.name.lower()
             if system_id in seen:
@@ -154,6 +168,8 @@ class ESGamelistLoader(BaseLoader):
         self,
         system: System,
         gamelist_path: Path,
+        quick_mode: bool,
+        max_asset_index_files: int,
         progress_callback=None,
     ) -> list[Game]:
         tree = ET.parse(gamelist_path)
@@ -195,8 +211,20 @@ class ESGamelistLoader(BaseLoader):
             self._attach_assets_from_es_tags(game, game_node, system.rom_root, gamelist_path.parent)
             games_by_rom[self._game_key(rom_path)] = game
 
+        if quick_mode:
+            self._emit(
+                progress_callback,
+                f"[scan] Quick mode: skipping deep ROM reconciliation for '{system.system_id}'.",
+            )
+            return sorted(games_by_rom.values(), key=lambda game: game.rom_filename.lower())
+
         # File-system reconciliation: add missing ROMs and discover assets not referenced in XML.
-        scanned_games = self._scan_games_without_metadata(system, progress_callback=progress_callback)
+        scanned_games = self._scan_games_without_metadata(
+            system,
+            include_assets=True,
+            max_asset_index_files=max_asset_index_files,
+            progress_callback=progress_callback,
+        )
         scanned_by_rom = {self._game_key(game.rom_path): game for game in scanned_games}
 
         for rom_key, scanned_game in scanned_by_rom.items():
@@ -232,20 +260,35 @@ class ESGamelistLoader(BaseLoader):
                 )
             )
 
-    def _scan_games_without_metadata(self, system: System, progress_callback=None) -> list[Game]:
+    def _scan_games_without_metadata(
+        self,
+        system: System,
+        include_assets: bool,
+        max_asset_index_files: int,
+        progress_callback=None,
+    ) -> list[Game]:
         self._emit(progress_callback, f"[scan] Scanning ROM files under: {system.rom_root}")
         games: list[Game] = []
         roms = self._scan_rom_files(system.rom_root)
         self._emit(progress_callback, f"[scan] Found {len(roms)} ROM files for system '{system.system_id}'.")
-        asset_index = self._build_asset_index(system.rom_root, progress_callback=progress_callback)
+        asset_index: dict[str, list[Path]] = {}
+        if include_assets:
+            asset_index = self._build_asset_index(
+                system.rom_root,
+                max_files=max_asset_index_files,
+                progress_callback=progress_callback,
+            )
+        else:
+            self._emit(progress_callback, f"[scan] Quick mode: asset indexing skipped for '{system.system_id}'.")
         for rom_path in roms:
             game = Game(
                 rom_path=rom_path,
                 system_id=system.system_id,
                 title=rom_path.stem,
             )
-            for asset in self._discover_assets_for_rom(rom_path, asset_index):
-                game.assets.append(asset)
+            if asset_index:
+                for asset in self._discover_assets_for_rom(rom_path, asset_index):
+                    game.assets.append(asset)
             games.append(game)
         return sorted(games, key=lambda game: game.rom_filename.lower())
 
@@ -286,7 +329,7 @@ class ESGamelistLoader(BaseLoader):
             unique.append(asset)
         return unique
 
-    def _build_asset_index(self, rom_root: Path, progress_callback=None) -> dict[str, list[Path]]:
+    def _build_asset_index(self, rom_root: Path, max_files: int, progress_callback=None) -> dict[str, list[Path]]:
         self._emit(progress_callback, f"[scan] Indexing assets under: {rom_root}")
         index: dict[str, list[Path]] = {}
         scanned = 0
@@ -303,8 +346,34 @@ class ESGamelistLoader(BaseLoader):
             index.setdefault(normalized_stem, []).append(path.resolve())
             if scanned % 500 == 0:
                 self._emit(progress_callback, f"[scan] Indexed {scanned} asset files...")
+            if scanned >= max_files:
+                self._emit(progress_callback, f"[scan] Asset index budget reached ({max_files}); stopping early.")
+                break
         self._emit(progress_callback, f"[scan] Indexed {scanned} asset files total.")
         return index
+
+    def _estimate_rom_count(self, rom_root: Path, budget: int) -> int:
+        count = 0
+        for path in rom_root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in ROM_EXTENSIONS:
+                continue
+            if self._is_under_asset_dir(path, rom_root):
+                continue
+            count += 1
+            if count >= budget:
+                break
+        return count
+
+    @staticmethod
+    def _collect_matches(root: Path, pattern: str, max_results: int) -> list[Path]:
+        results: list[Path] = []
+        for path in root.rglob(pattern):
+            results.append(path)
+            if len(results) >= max_results:
+                break
+        return sorted(results)
 
     def _infer_asset_type(self, path: Path) -> AssetType:
         stem = path.stem.lower()

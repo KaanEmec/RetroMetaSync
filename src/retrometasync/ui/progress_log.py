@@ -29,14 +29,31 @@ class ProgressLog(ctk.CTkFrame):
         )
         self.textbox.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self.textbox.configure(state="disabled")
+        self._pending_lines: list[str] = []
+        self._flush_after_id: str | None = None
+        self._flush_interval_ms = 150
 
     def log(self, message: str) -> None:
+        self._pending_lines.append(message)
+        if self._flush_after_id is None:
+            self._flush_after_id = self.after(self._flush_interval_ms, self._flush_pending)
+
+    def _flush_pending(self) -> None:
+        self._flush_after_id = None
+        if not self._pending_lines:
+            return
+        joined = "\n".join(self._pending_lines) + "\n"
+        self._pending_lines.clear()
         self.textbox.configure(state="normal")
-        self.textbox.insert("end", f"{message}\n")
+        self.textbox.insert("end", joined)
         self.textbox.see("end")
         self.textbox.configure(state="disabled")
 
     def clear(self) -> None:
+        if self._flush_after_id is not None:
+            self.after_cancel(self._flush_after_id)
+            self._flush_after_id = None
+        self._pending_lines.clear()
         self.textbox.configure(state="normal")
         self.textbox.delete("1.0", "end")
         self.textbox.configure(state="disabled")

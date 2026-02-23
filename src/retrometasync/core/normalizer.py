@@ -35,6 +35,7 @@ class LibraryNormalizer:
                 source_root=detection_result.source_root,
                 systems=detection_result.systems,
                 progress_callback=progress_callback,
+                scan_mode="quick",
             )
         )
         library = self._to_library(detection_result, load_result)

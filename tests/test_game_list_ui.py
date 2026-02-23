@@ -7,7 +7,15 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from retrometasync.core.models import Asset, AssetType, Game, Library, MetadataSource, System
+from retrometasync.core.models import (
+    Asset,
+    AssetType,
+    AssetVerificationState,
+    Game,
+    Library,
+    MetadataSource,
+    System,
+)
 from retrometasync.ui.game_list import GameListViewModel, _build_key
 
 
@@ -33,7 +41,13 @@ def _make_library() -> Library:
             rom_path=root / "snes" / "b.zip",
             system_id="snes",
             title="Game B",
-            assets=[Asset(asset_type=AssetType.VIDEO, file_path=root / "snes" / "b.mp4")],
+            assets=[
+                Asset(
+                    asset_type=AssetType.VIDEO,
+                    file_path=root / "snes" / "b.mp4",
+                    verification_state=AssetVerificationState.VERIFIED_EXISTS,
+                )
+            ],
         ),
     ]
     nes_roms = [
@@ -41,7 +55,13 @@ def _make_library() -> Library:
             rom_path=root / "nes" / "c.nes",
             system_id="nes",
             title="Game C",
-            assets=[Asset(asset_type=AssetType.BOX_FRONT, file_path=root / "nes" / "c.png")],
+            assets=[
+                Asset(
+                    asset_type=AssetType.BOX_FRONT,
+                    file_path=root / "nes" / "c.png",
+                    verification_state=AssetVerificationState.VERIFIED_EXISTS,
+                )
+            ],
         ),
     ]
     return Library(
@@ -85,7 +105,17 @@ class GameListViewModelTests(unittest.TestCase):
         lib = _make_library()
         vm = GameListViewModel(lib)
         keys = vm.filtered_keys("All Systems", "Missing Video")
-        self.assertEqual(len(keys), 2)
+        self.assertEqual(len(keys), 0)
+
+    def test_unchecked_asset_tags_are_rendered(self) -> None:
+        lib = _make_library()
+        vm = GameListViewModel(lib)
+        game_a = lib.games_by_system["snes"][0]
+        key = _build_key("snes", game_a)
+        assets_text = vm.rows_by_key()[key].assets
+        self.assertIn("UNCHECKED-IMG", assets_text)
+        self.assertIn("UNCHECKED-VID", assets_text)
+        self.assertIn("UNCHECKED-MAN", assets_text)
 
     def test_games_by_key_matches_library(self) -> None:
         lib = _make_library()

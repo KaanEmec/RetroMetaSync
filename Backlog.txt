@@ -1,0 +1,6 @@
+Backlog:
+- Gamelist / data merge if there is one in the target folder. The app should automatically add new entries in the relevant format in the relevant directory in the relevant gamelist or metadata file of the relevant selected library system.
+- Rating, genre, year columns in the Gamelist without breaking the UI, maybe a horizontal scroll?
+- Bigger, nicer looking checkbox in the Gamelist
+- A button that will make the app check all the unchecked assets for the visible list (filtered list)
+- 
