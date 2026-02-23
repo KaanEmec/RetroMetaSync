@@ -48,6 +48,7 @@ class ConvertPane(ctk.CTkFrame):
         self.options_row.grid_columnconfigure(0, weight=1)
         self.options_row.grid_columnconfigure(1, weight=1)
         self.options_row.grid_columnconfigure(2, weight=1)
+        self.options_row.grid_columnconfigure(3, weight=1)
 
         self.dry_run_var = ctk.BooleanVar(value=False)
         self.dry_run_check = ctk.CTkCheckBox(
@@ -66,6 +67,12 @@ class ConvertPane(ctk.CTkFrame):
             self.options_row, text="Export DAT files", variable=self.export_dat_var
         )
         self.export_dat_check.grid(row=0, column=2, padx=(0, 0), pady=0, sticky="w")
+
+        self.merge_metadata_var = ctk.BooleanVar(value=True)
+        self.merge_metadata_check = ctk.CTkCheckBox(
+            self.options_row, text="Merge Existing Metadata", variable=self.merge_metadata_var
+        )
+        self.merge_metadata_check.grid(row=0, column=3, padx=(8, 0), pady=0, sticky="w")
 
         self.convert_button = ctk.CTkButton(self, text="Start Conversion", state="disabled", command=self._handle_convert)
         self.convert_button.grid(row=5, column=0, columnspan=3, padx=10, pady=(4, 10), sticky="ew")
@@ -91,6 +98,9 @@ class ConvertPane(ctk.CTkFrame):
     def should_export_dat(self) -> bool:
         return bool(self.export_dat_var.get())
 
+    def should_merge_existing_metadata(self) -> bool:
+        return bool(self.merge_metadata_var.get())
+
     def set_busy(self, busy: bool) -> None:
         self.convert_button.configure(text="Converting..." if busy else "Start Conversion")
         self.convert_button.configure(state="disabled" if busy else "normal")
@@ -100,6 +110,7 @@ class ConvertPane(ctk.CTkFrame):
         self.dry_run_check.configure(state="disabled" if busy else "normal")
         self.overwrite_check.configure(state="disabled" if busy else "normal")
         self.export_dat_check.configure(state="disabled" if busy else "normal")
+        self.merge_metadata_check.configure(state="disabled" if busy else "normal")
 
     def _browse_output(self) -> None:
         selected = filedialog.askdirectory()

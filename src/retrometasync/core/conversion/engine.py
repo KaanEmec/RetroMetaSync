@@ -10,8 +10,8 @@ from typing import Callable
 from retrometasync.config.ecosystems import ECOSYSTEM_MEDIA_FALLBACK_FOLDERS
 from retrometasync.core.conversion.targets import TARGET_MODULES
 from retrometasync.core.conversion.writers.dat_writer import write_dat
-from retrometasync.core.conversion.writers.gamelist_xml import write_gamelist
-from retrometasync.core.conversion.writers.launchbox_xml import write_launchbox_platform_xml
+from retrometasync.core.conversion.writers.gamelist_xml import read_gamelist, write_gamelist
+from retrometasync.core.conversion.writers.launchbox_xml import read_launchbox_platform_xml, write_launchbox_platform_xml
 from retrometasync.core.models import Asset, AssetType, AssetVerificationState, Game, Library
 
 ProgressCallback = Callable[[str], None]
@@ -46,6 +46,7 @@ class ConversionRequest:
     export_dat: bool = False
     dry_run: bool = False
     overwrite_existing: bool = False
+    merge_existing_metadata: bool = True
 
 
 @dataclass(slots=True)
@@ -89,7 +90,8 @@ class ConversionEngine:
             progress,
             (
                 f"Starting conversion to '{request.target_ecosystem}' with {total_games} selected games."
-                f" dry_run={request.dry_run}, overwrite_existing={request.overwrite_existing}"
+                f" dry_run={request.dry_run}, overwrite_existing={request.overwrite_existing},"
+                f" merge_existing_metadata={request.merge_existing_metadata}"
             ),
         )
         if total_games == 0:
@@ -193,17 +195,38 @@ class ConversionEngine:
                     self._log(progress, f"[warn] {warning}")
 
         for gamelist_path, entries in gamelist_payload.items():
+            entries_to_write = entries
+            if request.merge_existing_metadata and gamelist_path.exists():
+                try:
+                    existing = read_gamelist(gamelist_path)
+                    entries_to_write = _merge_gamelist_entries(existing, entries)
+                except Exception as exc:  # noqa: BLE001
+                    warning = f"Failed to merge existing gamelist '{gamelist_path}': {exc}"
+                    result.warnings.append(warning)
+                    self._log(progress, f"[warn] {warning}")
             if request.dry_run:
-                self._log(progress, f"[dry-run] Would write gamelist: {gamelist_path} ({len(entries)} entries)")
+                self._log(progress, f"[dry-run] Would write gamelist: {gamelist_path} ({len(entries_to_write)} entries)")
             else:
-                write_gamelist(gamelist_path, entries)
+                write_gamelist(gamelist_path, entries_to_write)
                 self._log(progress, f"Wrote gamelist: {gamelist_path}")
 
         for platform_xml_path, entries in launchbox_payload.items():
+            entries_to_write = entries
+            if request.merge_existing_metadata and platform_xml_path.exists():
+                try:
+                    existing = read_launchbox_platform_xml(platform_xml_path)
+                    entries_to_write = _merge_launchbox_entries(existing, entries)
+                except Exception as exc:  # noqa: BLE001
+                    warning = f"Failed to merge existing LaunchBox XML '{platform_xml_path}': {exc}"
+                    result.warnings.append(warning)
+                    self._log(progress, f"[warn] {warning}")
             if request.dry_run:
-                self._log(progress, f"[dry-run] Would write LaunchBox XML: {platform_xml_path} ({len(entries)} entries)")
+                self._log(
+                    progress,
+                    f"[dry-run] Would write LaunchBox XML: {platform_xml_path} ({len(entries_to_write)} entries)",
+                )
             else:
-                write_launchbox_platform_xml(platform_xml_path, entries)
+                write_launchbox_platform_xml(platform_xml_path, entries_to_write)
                 self._log(progress, f"Wrote LaunchBox XML: {platform_xml_path}")
 
         if request.export_dat:
@@ -721,6 +744,7 @@ def _run_preflight_checks(request: ConversionRequest) -> dict[str, list[str]]:
 
     checks.append(f"Dry-run mode: {'ENABLED' if request.dry_run else 'DISABLED'}")
     checks.append(f"Overwrite existing files: {'YES' if request.overwrite_existing else 'NO'}")
+    checks.append(f"Merge existing metadata: {'YES' if request.merge_existing_metadata else 'NO'}")
     checks.append(f"DAT export: {'ENABLED' if request.export_dat else 'DISABLED'}")
 
     return {"checks": checks, "warnings": warnings}
@@ -772,3 +796,47 @@ def _relative_or_absolute(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _canonical_entry_path(path_value: str) -> str:
+    value = path_value.replace("\\", "/").strip()
+    while value.startswith("./"):
+        value = value[2:]
+    return value.lower()
+
+
+def _merge_by_key(
+    existing_entries: list[dict[str, str]],
+    new_entries: list[dict[str, str]],
+    key_field: str,
+) -> list[dict[str, str]]:
+    merged: dict[str, dict[str, str]] = {}
+    order: list[str] = []
+
+    def upsert(entries: list[dict[str, str]]) -> None:
+        for entry in entries:
+            key_raw = entry.get(key_field, "").strip()
+            if not key_raw:
+                continue
+            key = _canonical_entry_path(key_raw)
+            if key not in merged:
+                order.append(key)
+            merged[key] = dict(entry)
+
+    upsert(existing_entries)
+    upsert(new_entries)
+
+    # Keep output deterministic while preserving overwrite behavior.
+    sorted_keys = sorted(order, key=lambda k: (k, merged[k].get("name", "").lower(), merged[k].get("title", "").lower()))
+    return [merged[key] for key in sorted_keys]
+
+
+def _merge_gamelist_entries(existing_entries: list[dict[str, str]], new_entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    return _merge_by_key(existing_entries, new_entries, key_field="path")
+
+
+def _merge_launchbox_entries(
+    existing_entries: list[dict[str, str]],
+    new_entries: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    return _merge_by_key(existing_entries, new_entries, key_field="application_path")

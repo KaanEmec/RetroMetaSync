@@ -4,34 +4,56 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
+GAME_TAGS: tuple[tuple[str, str], ...] = (
+    ("title", "Title"),
+    ("sort_title", "SortTitle"),
+    ("application_path", "ApplicationPath"),
+    ("manual_path", "ManualPath"),
+    ("front_image_path", "FrontImagePath"),
+    ("screenshot_image_path", "ScreenshotImagePath"),
+    ("background_image_path", "BackgroundImagePath"),
+    ("logo_image_path", "LogoImagePath"),
+    ("video_path", "VideoPath"),
+    ("platform", "Platform"),
+    ("developer", "Developer"),
+    ("publisher", "Publisher"),
+    ("genre", "Genre"),
+    ("language", "Language"),
+    ("region", "Region"),
+    ("favorite", "Favorite"),
+    ("play_count", "PlayCount"),
+    ("last_played_date", "LastPlayedDate"),
+    ("community_star_rating", "CommunityStarRating"),
+    ("star_rating", "StarRating"),
+    ("notes", "Notes"),
+    ("release_date", "ReleaseDate"),
+)
+
+
+def read_launchbox_platform_xml(platform_xml_path: Path) -> list[dict[str, str]]:
+    if not platform_xml_path.exists():
+        return []
+    root = ET.parse(platform_xml_path).getroot()
+    entries: list[dict[str, str]] = []
+    for game_node in root.findall("Game"):
+        item: dict[str, str] = {}
+        for key, tag in GAME_TAGS:
+            value = game_node.findtext(tag)
+            if value:
+                item[key] = value
+        if item:
+            entries.append(item)
+    return entries
+
+
 def write_launchbox_platform_xml(platform_xml_path: Path, games: list[dict[str, str]]) -> None:
     platform_xml_path.parent.mkdir(parents=True, exist_ok=True)
 
     root = ET.Element("LaunchBox")
     for game_data in games:
         game_node = ET.SubElement(root, "Game")
-        _add_text(game_node, "Title", game_data.get("title"))
-        _add_text(game_node, "SortTitle", game_data.get("sort_title"))
-        _add_text(game_node, "ApplicationPath", game_data.get("application_path"))
-        _add_text(game_node, "ManualPath", game_data.get("manual_path"))
-        _add_text(game_node, "FrontImagePath", game_data.get("front_image_path"))
-        _add_text(game_node, "ScreenshotImagePath", game_data.get("screenshot_image_path"))
-        _add_text(game_node, "BackgroundImagePath", game_data.get("background_image_path"))
-        _add_text(game_node, "LogoImagePath", game_data.get("logo_image_path"))
-        _add_text(game_node, "VideoPath", game_data.get("video_path"))
-        _add_text(game_node, "Platform", game_data.get("platform"))
-        _add_text(game_node, "Developer", game_data.get("developer"))
-        _add_text(game_node, "Publisher", game_data.get("publisher"))
-        _add_text(game_node, "Genre", game_data.get("genre"))
-        _add_text(game_node, "Language", game_data.get("language"))
-        _add_text(game_node, "Region", game_data.get("region"))
-        _add_text(game_node, "Favorite", game_data.get("favorite"))
-        _add_text(game_node, "PlayCount", game_data.get("play_count"))
-        _add_text(game_node, "LastPlayedDate", game_data.get("last_played_date"))
-        _add_text(game_node, "CommunityStarRating", game_data.get("community_star_rating"))
-        _add_text(game_node, "StarRating", game_data.get("star_rating"))
-        _add_text(game_node, "Notes", game_data.get("notes"))
-        _add_text(game_node, "ReleaseDate", game_data.get("release_date"))
+        for key, tag in GAME_TAGS:
+            _add_text(game_node, tag, game_data.get(key))
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")

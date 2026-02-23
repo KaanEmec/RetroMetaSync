@@ -10,8 +10,9 @@ import customtkinter as ctk
 
 from retrometasync.core.conversion import ConversionEngine, ConversionRequest, ConversionResult
 from retrometasync.core import LibraryDetector, LibraryNormalizer
+from retrometasync.core.asset_verifier import verify_unchecked_assets
 from retrometasync.core.detection import DetectionResult
-from retrometasync.core.models import Library
+from retrometasync.core.models import Game, Library
 from retrometasync.core.normalizer import NormalizationResult
 from retrometasync.ui.convert_dialog import ConvertPane
 from retrometasync.ui.game_list import GameListPane
@@ -39,8 +40,9 @@ class MainWindow(ctk.CTk):
         self.current_library: Library | None = None
         self._analysis_running = False
         self._conversion_running = False
+        self._asset_check_running = False
         self._progress_lock = threading.Lock()
-        self._last_progress_emit: dict[str, float] = {"analysis": 0.0, "conversion": 0.0}
+        self._last_progress_emit: dict[str, float] = {"analysis": 0.0, "conversion": 0.0, "verify_assets": 0.0}
         self._progress_emit_interval_sec = 0.15
 
         self._build_layout()
@@ -65,6 +67,7 @@ class MainWindow(ctk.CTk):
 
         self.game_list = GameListPane(self.top_frame)
         self.game_list.grid(row=0, column=1, padx=(6, 0), pady=0, sticky="nsew")
+        self.game_list.set_on_check_unchecked_visible(self._on_check_unchecked_visible_assets)
 
         # Bottom section: progress log + conversion side-by-side.
         self.bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -134,7 +137,7 @@ class MainWindow(ctk.CTk):
             self.source_entry.insert(0, selected)
 
     def _on_analyze(self) -> None:
-        if self._analysis_running:
+        if self._analysis_running or self._asset_check_running:
             return
 
         # Validate user input early and provide clear feedback in status line.
@@ -206,6 +209,12 @@ class MainWindow(ctk.CTk):
                     self._on_conversion_complete(payload)  # type: ignore[arg-type]
                 elif event_type == "conversion_error":
                     self._on_conversion_error(str(payload))
+                elif event_type == "verify_assets_progress":
+                    self.progress_log.log(str(payload))
+                elif event_type == "verify_assets_complete":
+                    self._on_verify_assets_complete(payload)  # type: ignore[arg-type]
+                elif event_type == "verify_assets_error":
+                    self._on_verify_assets_error(str(payload))
         except Empty:
             pass
         finally:
@@ -259,7 +268,7 @@ class MainWindow(ctk.CTk):
         )
 
     def _on_convert(self) -> None:
-        if self._analysis_running or self._conversion_running:
+        if self._analysis_running or self._conversion_running or self._asset_check_running:
             return
         if self.current_library is None:
             self._set_status("Analyze a library before conversion.", is_error=True)
@@ -299,6 +308,7 @@ class MainWindow(ctk.CTk):
             export_dat=self.convert_pane.should_export_dat(),
             dry_run=self.convert_pane.is_dry_run(),
             overwrite_existing=self.convert_pane.should_overwrite_existing(),
+            merge_existing_metadata=self.convert_pane.should_merge_existing_metadata(),
         )
         worker = threading.Thread(target=self._convert_worker, args=(request,), daemon=True)
         worker.start()
@@ -336,6 +346,96 @@ class MainWindow(ctk.CTk):
         self._conversion_running = False
         self.convert_pane.set_busy(False)
         self._set_global_busy(False)
+        self.game_list.set_enabled(True)
+
+    def _on_check_unchecked_visible_assets(self) -> None:
+        if self._analysis_running or self._conversion_running or self._asset_check_running:
+            return
+        if self.current_library is None:
+            self._set_status("Analyze a library before checking assets.", is_error=True)
+            return
+
+        visible_games = self.game_list.visible_unchecked_games()
+        if not visible_games:
+            self._set_status("No unchecked assets found in the visible list.")
+            return
+
+        library = self.current_library
+        if library is None:
+            self._set_status("Analyze a library before checking assets.", is_error=True)
+            return
+        games_with_display: list[tuple[str, Game, str]] = []
+        for key, game in visible_games:
+            system = library.systems.get(game.system_id)
+            system_display = system.display_name if system is not None else game.system_id
+            games_with_display.append((key, game, system_display))
+
+        self._asset_check_running = True
+        self._set_global_busy(True)
+        self.convert_pane.set_enabled(False)
+        self.game_list.set_enabled(False)
+        with self._progress_lock:
+            self._last_progress_emit["verify_assets"] = 0.0
+        self.progress_log.log(f"Checking unchecked assets for {len(games_with_display)} visible games...")
+        self._set_status("Verifying visible unchecked assets...")
+
+        worker = threading.Thread(target=self._verify_assets_worker, args=(library, games_with_display), daemon=True)
+        worker.start()
+
+    def _verify_assets_worker(self, library: Library, visible_games: list[tuple[str, Game, str]]) -> None:
+        try:
+            updated_keys: list[str] = []
+            changed_assets = 0
+            total_games = len(visible_games)
+            for index, (key, game, system_display) in enumerate(visible_games, start=1):
+                self._enqueue_progress(
+                    "verify_assets",
+                    "verify_assets_progress",
+                    f"[stage] Checking assets {index}/{total_games}: {system_display} - {game.title}",
+                )
+                changes = verify_unchecked_assets(game, library=library, system_display=system_display)
+                if changes > 0:
+                    updated_keys.append(key)
+                    changed_assets += changes
+            self._enqueue_progress(
+                "verify_assets",
+                "verify_assets_progress",
+                f"Asset check finished: {len(visible_games)} visible games scanned, {changed_assets} assets updated.",
+            )
+            self.result_queue.put(
+                (
+                    "verify_assets_complete",
+                    {
+                        "updated_keys": updated_keys,
+                        "checked_games": len(visible_games),
+                        "changed_assets": changed_assets,
+                    },
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.result_queue.put(("verify_assets_error", str(exc)))
+
+    def _on_verify_assets_complete(self, payload: dict[str, object]) -> None:
+        updated_keys = payload.get("updated_keys", [])
+        if isinstance(updated_keys, list):
+            self.game_list.refresh_asset_states_for_keys([str(key) for key in updated_keys])
+        checked_games = int(payload.get("checked_games", 0))
+        changed_assets = int(payload.get("changed_assets", 0))
+        self.progress_log.log(f"Checked visible unchecked assets: games={checked_games}, updated_assets={changed_assets}")
+        self._set_status(f"Asset check complete: {changed_assets} assets updated across {checked_games} visible games.")
+        self._asset_check_running = False
+        self._set_global_busy(False)
+        has_games = bool(self.current_library and any(self.current_library.games_by_system.values()))
+        self.convert_pane.set_enabled(has_games)
+        self.game_list.set_enabled(True)
+
+    def _on_verify_assets_error(self, message: str) -> None:
+        self.progress_log.log(f"[error] Asset check failed: {message}")
+        self._set_status(f"Asset check failed: {message}", is_error=True)
+        self._asset_check_running = False
+        self._set_global_busy(False)
+        has_games = bool(self.current_library and any(self.current_library.games_by_system.values()))
+        self.convert_pane.set_enabled(has_games)
         self.game_list.set_enabled(True)
 
     def _set_global_busy(self, busy: bool) -> None:

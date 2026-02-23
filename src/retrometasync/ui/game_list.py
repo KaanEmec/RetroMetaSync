@@ -5,7 +5,7 @@ stable game key. Treeview is populated in chunks to keep UI responsive.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 import tkinter as tk
 from tkinter import ttk
@@ -52,6 +52,9 @@ class GameRowRecord:
     system_id: str
     game_title: str
     rom_filename: str
+    rating: str
+    genre: str
+    year: str
     assets: str
     has_image: bool
     has_video: bool
@@ -59,6 +62,12 @@ class GameRowRecord:
     missing_image: bool
     missing_video: bool
     missing_manual: bool
+    rating_value: float | None
+    year_value: int | None
+
+
+SELECTED_MARK = "☑"
+UNSELECTED_MARK = "☐"
 
 
 def _build_key(system_id: str, game: Game) -> str:
@@ -139,11 +148,16 @@ class GameListViewModel:
                 has_image = image_status == "has"
                 has_video = video_status == "has"
                 has_manual = manual_status == "has"
+                rating_value = game.rating
+                year_value = game.release_date.year if game.release_date else None
                 record = GameRowRecord(
                     key=key,
                     system_id=system_id,
                     game_title=normalize_row_text(game.title, MAX_COLUMN_TEXT_LEN),
                     rom_filename=normalize_row_text(game.rom_filename, MAX_COLUMN_TEXT_LEN),
+                    rating=f"{rating_value:.1f}" if rating_value is not None else "",
+                    genre=normalize_row_text(", ".join(game.genres), MAX_COLUMN_TEXT_LEN) if game.genres else "",
+                    year=str(year_value) if year_value is not None else "",
                     assets=_asset_tags(image_status, video_status, manual_status),
                     has_image=has_image,
                     has_video=has_video,
@@ -151,6 +165,8 @@ class GameListViewModel:
                     missing_image=image_status == "missing",
                     missing_video=video_status == "missing",
                     missing_manual=manual_status == "missing",
+                    rating_value=rating_value,
+                    year_value=year_value,
                 )
                 self._rows.append(record)
                 self._rows_by_key[key] = record
@@ -177,7 +193,7 @@ class GameListViewModel:
 
         if asset_filter == "Any Assets":
             return keys
-        rows_by_key = {r.key: r for r in self._rows}
+        rows_by_key = self._rows_by_key
         return [k for k in keys if _passes_asset_filter(rows_by_key[k], asset_filter)]
 
 
@@ -231,6 +247,7 @@ class GameListPane(ctk.CTkFrame):
         self._last_tree_rows: int | None = None
         self._sort_column: str | None = None
         self._sort_desc: bool = False
+        self._on_check_unchecked_visible: Callable[[], None] | None = None
 
         self.title_label = ctk.CTkLabel(
             self,
@@ -242,9 +259,9 @@ class GameListPane(ctk.CTkFrame):
 
         self.controls_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.controls_frame.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="ew")
-        for col in range(7):
+        for col in range(8):
             self.controls_frame.grid_columnconfigure(col, weight=0)
-        self.controls_frame.grid_columnconfigure(6, weight=1)
+        self.controls_frame.grid_columnconfigure(7, weight=1)
 
         self.system_filter_var = ctk.StringVar(value="All Systems")
         self.system_filter = ctk.CTkOptionMenu(
@@ -274,16 +291,23 @@ class GameListPane(ctk.CTkFrame):
             self.controls_frame, text="Clear Visible", width=105, command=lambda: self._set_visible_selection(False)
         )
         self.clear_visible_btn.grid(row=0, column=3, padx=(0, 6), pady=0, sticky="w")
+        self.select_unchecked_visible_btn = ctk.CTkButton(
+            self.controls_frame,
+            text="Check Unchecked Visible",
+            width=165,
+            command=self._handle_check_unchecked_visible,
+        )
+        self.select_unchecked_visible_btn.grid(row=0, column=4, padx=(0, 6), pady=0, sticky="w")
         self.select_all_btn = ctk.CTkButton(
             self.controls_frame, text="Select All", width=90, command=lambda: self._set_all_selection(True)
         )
-        self.select_all_btn.grid(row=0, column=4, padx=(0, 6), pady=0, sticky="w")
+        self.select_all_btn.grid(row=0, column=5, padx=(0, 6), pady=0, sticky="w")
         self.clear_all_btn = ctk.CTkButton(
             self.controls_frame, text="Clear All", width=90, command=lambda: self._set_all_selection(False)
         )
-        self.clear_all_btn.grid(row=0, column=5, padx=(0, 6), pady=0, sticky="w")
+        self.clear_all_btn.grid(row=0, column=6, padx=(0, 6), pady=0, sticky="w")
         self.selection_label = ctk.CTkLabel(self.controls_frame, text="Selected: 0", anchor="e")
-        self.selection_label.grid(row=0, column=6, padx=(6, 0), pady=0, sticky="e")
+        self.selection_label.grid(row=0, column=7, padx=(6, 0), pady=0, sticky="e")
 
         self._table_container = ctk.CTkFrame(
             self,
@@ -297,7 +321,7 @@ class GameListPane(ctk.CTkFrame):
 
         self._tree = ttk.Treeview(
             self._table_container,
-            columns=("selected", "system", "game_name", "rom_file", "assets"),
+            columns=("selected", "system", "game_name", "rom_file", "rating", "genre", "year", "assets"),
             show="headings",
             selectmode="extended",
             height=20,
@@ -309,18 +333,32 @@ class GameListPane(ctk.CTkFrame):
         self._tree.heading("system", text="🎯 System", command=lambda c="system": self._on_heading_click(c))
         self._tree.heading("game_name", text="🏷 Game Name", command=lambda c="game_name": self._on_heading_click(c))
         self._tree.heading("rom_file", text="🕹 ROM File", command=lambda c="rom_file": self._on_heading_click(c))
+        self._tree.heading("rating", text="⭐ Rating", command=lambda c="rating": self._on_heading_click(c))
+        self._tree.heading("genre", text="🎼 Genre", command=lambda c="genre": self._on_heading_click(c))
+        self._tree.heading("year", text="📅 Year", command=lambda c="year": self._on_heading_click(c))
         self._tree.heading("assets", text="📦 Assets", command=lambda c="assets": self._on_heading_click(c))
-        self._tree.column("selected", width=42, minwidth=42, stretch=False)
+        selected_col_width = max(56, round(56 * scale))
+        self._tree.column("selected", width=selected_col_width, minwidth=selected_col_width, stretch=False)
         self._tree.column("system", width=130, minwidth=100, stretch=False)
         self._tree.column("game_name", width=300, minwidth=180, stretch=True)
         self._tree.column("rom_file", width=300, minwidth=180, stretch=True)
+        self._tree.column("rating", width=90, minwidth=72, stretch=False)
+        self._tree.column("genre", width=220, minwidth=140, stretch=True)
+        self._tree.column("year", width=84, minwidth=70, stretch=False)
         self._tree.column("assets", width=320, minwidth=220, stretch=True)
 
         scrollbar_width = max(14, round(14 * scale))
         scrollbar = tk.Scrollbar(self._table_container, orient=tk.VERTICAL, command=self._tree.yview, width=scrollbar_width)
-        self._tree.configure(yscrollcommand=scrollbar.set)
+        horizontal_scrollbar = tk.Scrollbar(
+            self._table_container,
+            orient=tk.HORIZONTAL,
+            command=self._tree.xview,
+            width=scrollbar_width,
+        )
+        self._tree.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal_scrollbar.set)
         self._tree.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
+        horizontal_scrollbar.grid(row=1, column=0, sticky="ew")
 
         self._table_container.bind("<Configure>", self._on_table_configure)
         self.after_idle(self._update_tree_height)
@@ -390,12 +428,58 @@ class GameListPane(ctk.CTkFrame):
     def selected_count(self) -> int:
         return len(self._selected_keys)
 
+    def set_on_check_unchecked_visible(self, callback: Callable[[], None]) -> None:
+        self._on_check_unchecked_visible = callback
+
+    def visible_unchecked_game_keys(self) -> list[str]:
+        if not self._view_model:
+            return []
+        rows_by_key = self._view_model.rows_by_key()
+        keys: list[str] = []
+        for key in self._visible_keys:
+            record = rows_by_key.get(key)
+            if record and self._has_any_unchecked_asset(record):
+                keys.append(key)
+        return keys
+
+    def visible_unchecked_games(self) -> list[tuple[str, Game]]:
+        if not self._view_model:
+            return []
+        gbk = self._view_model.games_by_key()
+        return [(key, gbk[key]) for key in self.visible_unchecked_game_keys() if key in gbk]
+
+    def refresh_asset_states_for_keys(self, keys: list[str]) -> None:
+        if not self._view_model or not keys:
+            return
+        gbk = self._view_model.games_by_key()
+        rows_by_key = self._view_model.rows_by_key()
+        for key in keys:
+            game = gbk.get(key)
+            record = rows_by_key.get(key)
+            if game is None or record is None:
+                continue
+            image_status = _asset_status(game, IMAGE_ASSET_TYPES)
+            video_status = _asset_status(game, {AssetType.VIDEO})
+            manual_status = _asset_status(game, {AssetType.MANUAL})
+            rows_by_key[key] = replace(
+                record,
+                assets=_asset_tags(image_status, video_status, manual_status),
+                has_image=image_status == "has",
+                has_video=video_status == "has",
+                has_manual=manual_status == "has",
+                missing_image=image_status == "missing",
+                missing_video=video_status == "missing",
+                missing_manual=manual_status == "missing",
+            )
+        self._refresh_table_from_filter()
+
     def set_enabled(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
         self.system_filter.configure(state=state)
         self.asset_filter.configure(state=state)
         self.select_visible_btn.configure(state=state)
         self.clear_visible_btn.configure(state=state)
+        self.select_unchecked_visible_btn.configure(state=state)
         self.select_all_btn.configure(state=state)
         self.clear_all_btn.configure(state=state)
 
@@ -438,6 +522,10 @@ class GameListPane(ctk.CTkFrame):
     def _apply_filter_refresh(self) -> None:
         self._debounce_after_id = None
         self._refresh_table_from_filter()
+
+    def _handle_check_unchecked_visible(self) -> None:
+        if self._on_check_unchecked_visible is not None:
+            self._on_check_unchecked_visible()
 
     def _refresh_table_from_filter(self) -> None:
         self._cancel_chunk()
@@ -489,12 +577,21 @@ class GameListPane(ctk.CTkFrame):
             record = rows_by_key.get(key)
             if not record:
                 continue
-            sel = "[x]" if key in self._selected_keys else "[ ]"
+            sel = SELECTED_MARK if key in self._selected_keys else UNSELECTED_MARK
             self._tree.insert(
                 "",
                 tk.END,
                 iid=key,
-                values=(sel, record.system_id, record.game_title, record.rom_filename, record.assets),
+                values=(
+                    sel,
+                    record.system_id,
+                    record.game_title,
+                    record.rom_filename,
+                    record.rating,
+                    record.genre,
+                    record.year,
+                    record.assets,
+                ),
             )
         self._update_selection_label()
         if self._pending_insert_keys:
@@ -520,10 +617,10 @@ class GameListPane(ctk.CTkFrame):
     def _toggle_selection(self, key: str) -> None:
         if key in self._selected_keys:
             self._selected_keys.discard(key)
-            self._tree.set(key, "selected", "[ ]")
+            self._tree.set(key, "selected", UNSELECTED_MARK)
         else:
             self._selected_keys.add(key)
-            self._tree.set(key, "selected", "[x]")
+            self._tree.set(key, "selected", SELECTED_MARK)
         self._update_selection_label()
 
     def _set_visible_selection(self, selected: bool) -> None:
@@ -547,9 +644,17 @@ class GameListPane(ctk.CTkFrame):
         self._refresh_selection_indicators()
         self._update_selection_label()
 
+    @staticmethod
+    def _has_any_unchecked_asset(record: GameRowRecord) -> bool:
+        return (
+            (not record.has_image and not record.missing_image)
+            or (not record.has_video and not record.missing_video)
+            or (not record.has_manual and not record.missing_manual)
+        )
+
     def _refresh_selection_indicators(self) -> None:
         for iid in self._tree.get_children():
-            self._tree.set(iid, "selected", "[x]" if iid in self._selected_keys else "[ ]")
+            self._tree.set(iid, "selected", SELECTED_MARK if iid in self._selected_keys else UNSELECTED_MARK)
 
     def _update_selection_label(self) -> None:
         self.selection_label.configure(text=f"Selected: {self.selected_count()}")
@@ -566,6 +671,20 @@ class GameListPane(ctk.CTkFrame):
             return sorted(keys, key=lambda k: rows_by_key[k].game_title.lower(), reverse=self._sort_desc)
         if self._sort_column == "rom_file":
             return sorted(keys, key=lambda k: rows_by_key[k].rom_filename.lower(), reverse=self._sort_desc)
+        if self._sort_column == "rating":
+            return sorted(
+                keys,
+                key=lambda k: (rows_by_key[k].rating_value is None, rows_by_key[k].rating_value or 0.0),
+                reverse=self._sort_desc,
+            )
+        if self._sort_column == "genre":
+            return sorted(keys, key=lambda k: rows_by_key[k].genre.lower(), reverse=self._sort_desc)
+        if self._sort_column == "year":
+            return sorted(
+                keys,
+                key=lambda k: (rows_by_key[k].year_value is None, rows_by_key[k].year_value or 0),
+                reverse=self._sort_desc,
+            )
         if self._sort_column == "assets":
             return sorted(keys, key=lambda k: rows_by_key[k].assets.lower(), reverse=self._sort_desc)
         return keys
@@ -585,6 +704,9 @@ class GameListPane(ctk.CTkFrame):
             "system": "🎯 System",
             "game_name": "🏷 Game Name",
             "rom_file": "🕹 ROM File",
+            "rating": "⭐ Rating",
+            "genre": "🎼 Genre",
+            "year": "📅 Year",
             "assets": "📦 Assets",
         }
         for col, base in label_map.items():

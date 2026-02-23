@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -392,6 +393,125 @@ class ConversionEngineTests(unittest.TestCase):
             converted_image = output_root / "roms" / "snes" / "images" / "Secret of Evermore-image.png"
             self.assertTrue(converted_image.exists())
             self.assertGreaterEqual(result.assets_copied, 1)
+
+    def test_merge_existing_gamelist_replaces_matching_entries_and_keeps_others(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_existing = source_root / "F-Zero.sfc"
+            rom_new = source_root / "Pilotwings.sfc"
+            rom_existing.write_bytes(b"rom1")
+            rom_new.write_bytes(b"rom2")
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=source_root,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            existing_game = Game(rom_path=rom_existing, system_id="snes", title="F-Zero New", rating=4.8)
+            new_game = Game(rom_path=rom_new, system_id="snes", title="Pilotwings", rating=3.7)
+            library = Library(source_root=source_root, systems={"snes": system}, games_by_system={"snes": [existing_game, new_game]})
+
+            gamelist_path = output_root / "roms" / "snes" / "gamelist.xml"
+            gamelist_path.parent.mkdir(parents=True, exist_ok=True)
+            gamelist_path.write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./F-Zero.sfc</path>
+    <name>F-Zero Old</name>
+    <rating>1.00</rating>
+  </game>
+  <game>
+    <path>./Super Metroid.sfc</path>
+    <name>Super Metroid</name>
+  </game>
+</gameList>
+""",
+                encoding="utf-8",
+            )
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [existing_game, new_game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+                merge_existing_metadata=True,
+            )
+            ConversionEngine().convert(request)
+
+            root_xml = ET.parse(gamelist_path).getroot()
+            names_by_path = {
+                node.findtext("path"): node.findtext("name")
+                for node in root_xml.findall("game")
+            }
+            self.assertEqual(names_by_path.get("./F-Zero.sfc"), "F-Zero New")
+            self.assertEqual(names_by_path.get("./Super Metroid.sfc"), "Super Metroid")
+            self.assertEqual(names_by_path.get("./Pilotwings.sfc"), "Pilotwings")
+
+    def test_merge_existing_launchbox_xml_replaces_matching_entries_and_keeps_others(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_existing = source_root / "Contra.nes"
+            rom_new = source_root / "Duck Tales.nes"
+            rom_existing.write_bytes(b"rom1")
+            rom_new.write_bytes(b"rom2")
+
+            system = System(
+                system_id="nes",
+                display_name="NES",
+                rom_root=source_root,
+                metadata_source=MetadataSource.LAUNCHBOX_XML,
+            )
+            existing_game = Game(rom_path=rom_existing, system_id="nes", title="Contra New")
+            new_game = Game(rom_path=rom_new, system_id="nes", title="Duck Tales")
+            library = Library(source_root=source_root, systems={"nes": system}, games_by_system={"nes": [existing_game, new_game]})
+
+            platform_xml = output_root / "Data" / "Platforms" / "NES.xml"
+            platform_xml.parent.mkdir(parents=True, exist_ok=True)
+            platform_xml.write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<LaunchBox>
+  <Game>
+    <Title>Contra Old</Title>
+    <ApplicationPath>Games/NES/Contra.nes</ApplicationPath>
+    <Platform>NES</Platform>
+  </Game>
+  <Game>
+    <Title>Ice Climber</Title>
+    <ApplicationPath>Games/NES/Ice Climber.nes</ApplicationPath>
+    <Platform>NES</Platform>
+  </Game>
+</LaunchBox>
+""",
+                encoding="utf-8",
+            )
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"nes": [existing_game, new_game]},
+                target_ecosystem="launchbox",
+                output_root=output_root,
+                merge_existing_metadata=True,
+            )
+            ConversionEngine().convert(request)
+
+            root_xml = ET.parse(platform_xml).getroot()
+            titles_by_app = {
+                node.findtext("ApplicationPath"): node.findtext("Title")
+                for node in root_xml.findall("Game")
+            }
+            self.assertEqual(titles_by_app.get("Games/NES/Contra.nes"), "Contra New")
+            self.assertEqual(titles_by_app.get("Games/NES/Ice Climber.nes"), "Ice Climber")
+            self.assertEqual(titles_by_app.get("Games/NES/Duck Tales.nes"), "Duck Tales")
 
 
 if __name__ == "__main__":

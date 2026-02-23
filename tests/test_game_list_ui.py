@@ -1,6 +1,7 @@
 """Tests for game list ViewModel and selection integrity (high-scale UI plan)."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import sys
 import unittest
@@ -16,6 +17,7 @@ from retrometasync.core.models import (
     MetadataSource,
     System,
 )
+from retrometasync.core.asset_verifier import verify_unchecked_assets
 from retrometasync.ui.game_list import GameListViewModel, _build_key
 
 
@@ -55,6 +57,9 @@ def _make_library() -> Library:
             rom_path=root / "nes" / "c.nes",
             system_id="nes",
             title="Game C",
+            genres=["Action", "Platform"],
+            rating=4.5,
+            release_date=datetime(1991, 1, 1),
             assets=[
                 Asset(
                     asset_type=AssetType.BOX_FRONT,
@@ -128,6 +133,17 @@ class GameListViewModelTests(unittest.TestCase):
                 self.assertIn(key, gbk)
                 self.assertEqual(gbk[key].title, g.title)
 
+    def test_rating_genre_year_fields_are_mapped(self) -> None:
+        lib = _make_library()
+        vm = GameListViewModel(lib)
+        game_c = lib.games_by_system["nes"][0]
+        key = _build_key("nes", game_c)
+        row = vm.rows_by_key()[key]
+        self.assertEqual(row.rating, "4.5")
+        self.assertEqual(row.year, "1991")
+        self.assertIn("Action", row.genre)
+        self.assertIn("Platform", row.genre)
+
 
 class GameListSelectionIntegrityTests(unittest.TestCase):
     """Selection state is key-based; bulk actions and filters must not lose selection."""
@@ -184,5 +200,103 @@ class GameListSelectionIntegrityTests(unittest.TestCase):
         selected = pane.get_selected_games()
         self.assertEqual(len(selected["snes"]), 2)
         self.assertEqual(len(selected["nes"]), 1)
+
+        root.destroy()
+
+    def test_tree_has_new_columns_and_horizontal_scroll(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        self.assertIn("rating", pane._tree["columns"])
+        self.assertIn("genre", pane._tree["columns"])
+        self.assertIn("year", pane._tree["columns"])
+        self.assertTrue(bool(pane._tree.cget("xscrollcommand")))
+
+        root.destroy()
+
+    def test_check_unchecked_visible_uses_callback_without_changing_selection(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        lib = _make_library()
+        pane.set_library(lib)
+        for _ in range(5):
+            root.update_idletasks()
+
+        called = {"count": 0}
+
+        def on_check() -> None:
+            called["count"] += 1
+
+        pane._set_all_selection(True)
+        before = pane.selected_count()
+        pane.set_on_check_unchecked_visible(on_check)
+        pane._handle_check_unchecked_visible()
+        self.assertEqual(called["count"], 1)
+        self.assertEqual(pane.selected_count(), before)
+
+        root.destroy()
+
+    def test_refresh_asset_states_for_keys_updates_asset_tags(self) -> None:
+        import customtkinter as ctk
+        import tempfile
+        from retrometasync.ui.game_list import GameListPane
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            rom_path = root_dir / "test.rom"
+            rom_path.write_bytes(b"rom")
+            image_path = root_dir / "image.png"
+            image_path.write_bytes(b"img")
+            missing_video_path = root_dir / "video.mp4"
+
+            game = Game(
+                rom_path=rom_path,
+                system_id="snes",
+                title="Test Game",
+                assets=[
+                    Asset(asset_type=AssetType.BOX_FRONT, file_path=image_path),
+                    Asset(asset_type=AssetType.VIDEO, file_path=missing_video_path),
+                ],
+            )
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=root_dir,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            library = Library(source_root=root_dir, systems={"snes": system}, games_by_system={"snes": [game]})
+
+            root = ctk.CTk()
+            root.withdraw()
+            pane = GameListPane(root)
+            pane.set_library(library)
+            for _ in range(5):
+                root.update_idletasks()
+
+            key = pane.visible_unchecked_game_keys()[0]
+            before_assets = pane._view_model.rows_by_key()[key].assets  # type: ignore[union-attr]
+            self.assertIn("UNCHECKED-IMG", before_assets)
+            self.assertIn("UNCHECKED-VID", before_assets)
+
+            verify_unchecked_assets(game)
+            pane.refresh_asset_states_for_keys([key])
+            for _ in range(5):
+                root.update_idletasks()
+            after_assets = pane._view_model.rows_by_key()[key].assets  # type: ignore[union-attr]
+            self.assertIn("IMG", after_assets)
+            self.assertIn("NO-VID", after_assets)
+            self.assertNotIn("UNCHECKED-IMG", after_assets)
+            self.assertNotIn("UNCHECKED-VID", after_assets)
 
         root.destroy()
