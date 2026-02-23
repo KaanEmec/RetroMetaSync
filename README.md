@@ -18,15 +18,15 @@
 **RetroMetaSync** is a desktop application that lets you **analyze**, **convert**, and **migrate** your retro gaming libraries—ROMs, box art, videos, manuals, and metadata—between different frontend ecosystems. Whether you're moving from LaunchBox to Batocera, from ES-DE to RetroBat, or syncing libraries across devices, RetroMetaSync handles the format translation and file organization for you.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  SOURCE LIBRARY                    RETROMETASYNC                    TARGET  │
-│  (any supported ecosystem)          ────────────────                 (your   │
-│                                    • Detect ecosystem                choice) │
-│  📁 LaunchBox / ES-DE / Batocera    • Parse metadata                          │
-│  📁 RetroBat / RetroArch / etc.     • Normalize to internal model              │
-│                                    • Map systems & assets                     │
-│  📄 gamelist.xml / Platforms/*.xml  • Convert & write output                  │
-│  🖼 Images, videos, manuals         • Merge or overwrite                       │
+┌─────────────────────────────────────────────────────────────────────────────    ┐
+│  SOURCE LIBRARY                    RETROMETASYNC                    TARGET      │
+│  (any supported ecosystem)          ────────────────                 (your      │
+│                                       • Detect ecosystem                choice) │
+│  📁 LaunchBox / ES-DE / Batocera      • Parse metadata                          │
+│  📁 RetroBat / RetroArch / etc.       • Normalize to internal model             │
+│                                       • Map systems & assets                    │
+│  📄 gamelist.xml / Platforms/*.xml    • Convert & write output                 │
+│  🖼 Images, videos, manuals           • Merge or overwrite                      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -155,6 +155,32 @@ python -m retrometasync.app
 3. **Review** — Check the Library Dashboard and Game List; filter and select games to convert
 4. **Configure conversion** — Choose target ecosystem (Batocera, ES-DE, LaunchBox, RetroBat, ES Classic), output path, and options
 5. **Convert** — Click **Start Conversion**; resolve system mapping and duplicate conflicts if prompted
+
+---
+
+## Building a Windows executable
+
+To create a standalone `.exe` that runs on Windows 10 and 11 without Python installed:
+
+```bash
+# Install build dependencies
+pip install pyinstaller customtkinter
+
+# Build (from project root)
+python -m PyInstaller --noconfirm --clean RetroMetaSync.spec
+```
+
+Or run the provided batch script:
+
+```batch
+build_exe.bat
+```
+
+**Output:** `dist\RetroMetaSync\RetroMetaSync.exe` plus supporting files in the same folder.
+
+> **Important:** Always run the exe from `dist\RetroMetaSync\`, **never** from the `build` folder. Running from `build` causes a "Failed to load Python DLL" error. Use `run_retrometasync.bat` or double-click `dist\RetroMetaSync\RetroMetaSync.exe` directly.
+
+**To distribute:** Copy the entire `dist\RetroMetaSync` folder to another Windows 10/11 PC—no Python installation required. If you get "The specified module could not be found" on a fresh PC, install the [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
 ---
 
