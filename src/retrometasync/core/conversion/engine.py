@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from glob import escape as glob_escape
 import os
 from pathlib import Path
+import re
 import shutil
 from typing import Callable
 
@@ -47,6 +48,8 @@ class ConversionRequest:
     dry_run: bool = False
     overwrite_existing: bool = False
     merge_existing_metadata: bool = True
+    system_mapping: dict[str, str] = field(default_factory=dict)
+    conflict_decisions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -64,12 +67,95 @@ class ConversionResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class DuplicateConflict:
+    key: str
+    source_game_key: str
+    source_system_id: str
+    destination_system: str
+    game_title: str
+    rom_filename: str
+    existing_title: str
+    match_key: str
+    metadata_path: Path
+
+
 class ConversionEngine:
     """Target-agnostic conversion orchestrator.
 
     The engine delegates path conventions to target planners, then performs
     copy/write operations with validation and progress logging.
     """
+
+    def preview_duplicate_conflicts(self, request: ConversionRequest) -> list[DuplicateConflict]:
+        if request.target_ecosystem not in TARGET_MODULES:
+            raise ValueError(f"Unsupported target ecosystem: {request.target_ecosystem}")
+        planner = TARGET_MODULES[request.target_ecosystem]
+        output_root = request.output_root.expanduser().resolve()
+
+        # Group selected games by destination metadata path.
+        grouped: dict[Path, list[tuple[str, str, Game, str]]] = {}
+        for system_id, games in request.selected_games.items():
+            if not games:
+                continue
+            system_display = request.library.systems.get(system_id).display_name if system_id in request.library.systems else system_id
+            destination_system_id, destination_system_display = _resolve_destination_system(
+                target_ecosystem=request.target_ecosystem,
+                source_system_id=system_id,
+                source_system_display=system_display,
+                system_mapping=request.system_mapping,
+            )
+            for game in games:
+                stem = _safe_stem(game.rom_basename)
+                rom_name = _safe_filename(game.rom_filename)
+                planned_paths = planner.plan_paths(
+                    output_root,
+                    system_id,
+                    system_display,
+                    rom_name,
+                    stem,
+                    destination_system_id=destination_system_id,
+                    destination_system_display=destination_system_display,
+                )
+                metadata_path = planned_paths.get("gamelist") or planned_paths.get("platform_xml")
+                if metadata_path is None:
+                    continue
+                match_key = _game_match_key(game)
+                grouped.setdefault(metadata_path, []).append((system_id, destination_system_display, game, match_key))
+
+        conflicts: list[DuplicateConflict] = []
+        for metadata_path, selected in grouped.items():
+            existing_entries = _read_existing_metadata_entries(metadata_path)
+            if not existing_entries:
+                continue
+            existing_by_match_key: dict[str, str] = {}
+            for entry in existing_entries:
+                title_key = _entry_match_key(entry)
+                if not title_key:
+                    continue
+                existing_title = entry.get("title") or entry.get("name") or ""
+                if title_key not in existing_by_match_key:
+                    existing_by_match_key[title_key] = existing_title
+            for source_system_id, destination_system_display, game, match_key in selected:
+                existing_title = existing_by_match_key.get(match_key)
+                if not existing_title:
+                    continue
+                conflict_key = _conflict_key(metadata_path, destination_system_display, match_key, game)
+                conflicts.append(
+                    DuplicateConflict(
+                        key=conflict_key,
+                        source_game_key=_selected_game_key(source_system_id, game),
+                        source_system_id=source_system_id,
+                        destination_system=destination_system_display,
+                        game_title=game.title,
+                        rom_filename=game.rom_filename,
+                        existing_title=existing_title,
+                        match_key=match_key,
+                        metadata_path=metadata_path,
+                    )
+                )
+        conflicts.sort(key=lambda c: (c.destination_system.lower(), c.game_title.lower(), c.rom_filename.lower()))
+        return conflicts
 
     def convert(self, request: ConversionRequest, progress: ProgressCallback | None = None) -> ConversionResult:
         if request.target_ecosystem not in TARGET_MODULES:
@@ -108,20 +194,62 @@ class ConversionEngine:
         for warning in preflight["warnings"]:
             self._log(progress, f"[warn] {warning}")
 
+        duplicate_conflicts = self.preview_duplicate_conflicts(request)
+        if duplicate_conflicts:
+            self._log(progress, f"Duplicate conflicts detected: {len(duplicate_conflicts)}")
+        conflict_by_game: dict[str, DuplicateConflict] = {}
+        keep_new_match_keys: dict[Path, set[str]] = {}
+        for conflict in duplicate_conflicts:
+            game_key = conflict.source_game_key
+            if game_key not in conflict_by_game:
+                conflict_by_game[game_key] = conflict
+            decision = (request.conflict_decisions.get(conflict.key, "keep_new") or "keep_new").strip().lower()
+            if decision not in {"keep_new", "keep_existing"}:
+                decision = "keep_new"
+            if decision == "keep_new":
+                keep_new_match_keys.setdefault(conflict.metadata_path, set()).add(conflict.match_key)
+
         for system_id, games in request.selected_games.items():
             if not games:
                 continue
 
             result.systems_processed += 1
             system_display = request.library.systems.get(system_id).display_name if system_id in request.library.systems else system_id
+            destination_system_id, destination_system_display = _resolve_destination_system(
+                target_ecosystem=request.target_ecosystem,
+                source_system_id=system_id,
+                source_system_display=system_display,
+                system_mapping=request.system_mapping,
+            )
             self._log(progress, f"Processing system '{system_id}' ({len(games)} games).")
 
             for game in games:
+                game_key = _selected_game_key(system_id, game)
+                conflict = conflict_by_game.get(game_key)
+                if conflict is not None:
+                    decision = (request.conflict_decisions.get(conflict.key, "keep_new") or "keep_new").strip().lower()
+                    if decision == "keep_existing":
+                        self._log(
+                            progress,
+                            (
+                                f"[conflict] Keeping existing metadata/file for '{game.title}'"
+                                f" in '{conflict.destination_system}'"
+                            ),
+                        )
+                        continue
                 result.games_processed += 1
                 try:
                     stem = _safe_stem(game.rom_basename)
                     rom_name = _safe_filename(game.rom_filename)
-                    planned_paths = planner.plan_paths(output_root, system_id, system_display, rom_name, stem)
+                    planned_paths = planner.plan_paths(
+                        output_root,
+                        system_id,
+                        system_display,
+                        rom_name,
+                        stem,
+                        destination_system_id=destination_system_id,
+                        destination_system_display=destination_system_display,
+                    )
 
                     # Resolve destination up front to avoid silent overwrites.
                     if request.copy_roms:
@@ -177,7 +305,7 @@ class ConversionEngine:
                             output_root,
                             planned_paths,
                             copied_asset_targets,
-                            platform_name=system_display,
+                            platform_name=destination_system_display,
                         )
                         launchbox_payload.setdefault(planned_paths["platform_xml"], []).append(entry)
 
@@ -199,6 +327,9 @@ class ConversionEngine:
             if request.merge_existing_metadata and gamelist_path.exists():
                 try:
                     existing = read_gamelist(gamelist_path)
+                    replace_keys = keep_new_match_keys.get(gamelist_path, set())
+                    if replace_keys:
+                        existing = [entry for entry in existing if _entry_match_key(entry) not in replace_keys]
                     entries_to_write = _merge_gamelist_entries(existing, entries)
                 except Exception as exc:  # noqa: BLE001
                     warning = f"Failed to merge existing gamelist '{gamelist_path}': {exc}"
@@ -215,6 +346,9 @@ class ConversionEngine:
             if request.merge_existing_metadata and platform_xml_path.exists():
                 try:
                     existing = read_launchbox_platform_xml(platform_xml_path)
+                    replace_keys = keep_new_match_keys.get(platform_xml_path, set())
+                    if replace_keys:
+                        existing = [entry for entry in existing if _entry_match_key(entry) not in replace_keys]
                     entries_to_write = _merge_launchbox_entries(existing, entries)
                 except Exception as exc:  # noqa: BLE001
                     warning = f"Failed to merge existing LaunchBox XML '{platform_xml_path}': {exc}"
@@ -796,6 +930,85 @@ def _relative_or_absolute(path: Path, root: Path) -> str:
         return path.relative_to(root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _resolve_destination_system(
+    target_ecosystem: str,
+    source_system_id: str,
+    source_system_display: str,
+    system_mapping: dict[str, str],
+) -> tuple[str, str]:
+    mapped = system_mapping.get(source_system_id, "").strip()
+    if target_ecosystem == "launchbox":
+        destination_display = mapped or source_system_display or source_system_id
+        destination_id = destination_display
+    else:
+        destination_id = mapped or source_system_id
+        destination_display = mapped or source_system_display or source_system_id
+    return destination_id, destination_display
+
+
+def _selected_game_key(system_id: str, game: Game) -> str:
+    return f"{system_id}::{game.rom_path.resolve().as_posix().lower()}"
+
+
+def _read_existing_metadata_entries(metadata_path: Path) -> list[dict[str, str]]:
+    if not metadata_path.exists():
+        return []
+    if metadata_path.suffix.lower() != ".xml":
+        return []
+    parent_name = metadata_path.parent.name.lower()
+    if metadata_path.name.lower() == "gamelist.xml":
+        try:
+            return read_gamelist(metadata_path)
+        except Exception:  # noqa: BLE001
+            return []
+    if parent_name == "platforms":
+        try:
+            return read_launchbox_platform_xml(metadata_path)
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def _entry_match_key(entry: dict[str, str]) -> str:
+    title = (entry.get("title") or entry.get("name") or "").strip()
+    if title:
+        return _normalize_match_text(title)
+    path_or_app = (entry.get("path") or entry.get("application_path") or "").strip()
+    if not path_or_app:
+        return ""
+    stem = Path(path_or_app.replace("\\", "/")).stem
+    return _normalize_match_text(stem)
+
+
+def _game_match_key(game: Game) -> str:
+    title = game.title.strip()
+    if title:
+        return _normalize_match_text(title)
+    return _normalize_match_text(game.rom_basename)
+
+
+def _normalize_match_text(value: str) -> str:
+    text = value.lower().strip()
+    text = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", text)
+    text = re.sub(r"\b(v\d+|ver\s*\d+|version\s*\d+|rev\s*[a-z0-9]+)\b", " ", text)
+    text = re.sub(r"\b(beta|proto|prototype|usa|europe|japan|world|eng|en)\b", " ", text)
+    text = re.sub(r"[_\-]+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _conflict_key(metadata_path: Path, destination_system: str, match_key: str, game: Game) -> str:
+    return "::".join(
+        [
+            metadata_path.as_posix().lower(),
+            destination_system.lower(),
+            match_key,
+            game.rom_path.resolve().as_posix().lower(),
+        ]
+    )
 
 
 def _canonical_entry_path(path_value: str) -> str:

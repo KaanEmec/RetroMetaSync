@@ -247,6 +247,115 @@ class GameListSelectionIntegrityTests(unittest.TestCase):
 
         root.destroy()
 
+    def test_search_enter_filters_by_title_within_visible_subset(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        pane.system_filter_var.set("snes")
+        pane._apply_filter_refresh()
+        pane.search_filter_var.set("game b")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+
+        self.assertEqual(len(pane._visible_keys), 1)
+        self.assertTrue(pane._visible_keys[0].startswith("snes::"))
+        self.assertIn("b.zip", pane._visible_keys[0])
+
+        root.destroy()
+
+    def test_search_enter_filters_by_filename_case_insensitive(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        pane.search_filter_var.set("C.NES")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+
+        self.assertEqual(len(pane._visible_keys), 1)
+        self.assertIn("c.nes", pane._visible_keys[0])
+
+        root.destroy()
+
+    def test_search_empty_restores_current_filter_rows(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        pane.system_filter_var.set("snes")
+        pane._apply_filter_refresh()
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 2)
+
+        pane.search_filter_var.set("game a")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 1)
+
+        pane.search_filter_var.set("")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 2)
+
+        root.destroy()
+
+    def test_search_applies_within_asset_filtered_visible_list(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        pane.asset_filter_var.set("Has Video")
+        pane._apply_filter_refresh()
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 1)
+        self.assertIn("b.zip", pane._visible_keys[0])
+
+        pane.search_filter_var.set("game c")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 0)
+
+        pane.search_filter_var.set("b.zip")
+        pane._on_search_enter(None)
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertEqual(len(pane._visible_keys), 1)
+        self.assertIn("b.zip", pane._visible_keys[0])
+
+        root.destroy()
+
     def test_refresh_asset_states_for_keys_updates_asset_tags(self) -> None:
         import customtkinter as ctk
         import tempfile

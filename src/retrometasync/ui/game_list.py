@@ -283,6 +283,16 @@ class GameListPane(ctk.CTkFrame):
         )
         self.asset_filter.grid(row=0, column=1, padx=(0, 6), pady=0, sticky="w")
 
+        self.search_filter_var = ctk.StringVar(value="")
+        self.search_entry = ctk.CTkEntry(
+            self.controls_frame,
+            textvariable=self.search_filter_var,
+            placeholder_text="Search title or filename...",
+            width=260,
+        )
+        self.search_entry.grid(row=1, column=0, columnspan=8, padx=(0, 6), pady=(6, 0), sticky="ew")
+        self.search_entry.bind("<Return>", self._on_search_enter)
+
         self.select_visible_btn = ctk.CTkButton(
             self.controls_frame, text="Select Visible", width=105, command=lambda: self._set_visible_selection(True)
         )
@@ -388,6 +398,7 @@ class GameListPane(ctk.CTkFrame):
         self.system_filter.configure(values=system_values)
         self.system_filter_var.set("All Systems")
         self.asset_filter_var.set("Any Assets")
+        self.search_filter_var.set("")
 
         self._view_model = GameListViewModel(library)
         n = len(self._view_model.games_by_key())
@@ -406,6 +417,7 @@ class GameListPane(ctk.CTkFrame):
         self.system_filter.configure(values=["All Systems"])
         self.system_filter_var.set("All Systems")
         self.asset_filter_var.set("Any Assets")
+        self.search_filter_var.set("")
         self._sort_column = None
         self._sort_desc = False
         self._refresh_heading_labels()
@@ -482,6 +494,7 @@ class GameListPane(ctk.CTkFrame):
         self.select_unchecked_visible_btn.configure(state=state)
         self.select_all_btn.configure(state=state)
         self.clear_all_btn.configure(state=state)
+        self.search_entry.configure(state=state)
 
     def _schedule_filter_refresh(self) -> None:
         self._cancel_debounce()
@@ -523,6 +536,11 @@ class GameListPane(ctk.CTkFrame):
         self._debounce_after_id = None
         self._refresh_table_from_filter()
 
+    def _on_search_enter(self, _event) -> str:
+        self._cancel_debounce()
+        self._apply_filter_refresh()
+        return "break"
+
     def _handle_check_unchecked_visible(self) -> None:
         if self._on_check_unchecked_visible is not None:
             self._on_check_unchecked_visible()
@@ -538,6 +556,18 @@ class GameListPane(ctk.CTkFrame):
         system_filter = self.system_filter_var.get()
         asset_filter = self.asset_filter_var.get()
         filtered = self._view_model.filtered_keys(system_filter, asset_filter)
+        search_text = self.search_filter_var.get().strip().lower()
+        if search_text:
+            games_by_key = self._view_model.games_by_key()
+            filtered = [
+                key
+                for key in filtered
+                if key in games_by_key
+                and (
+                    search_text in (games_by_key[key].title or "").lower()
+                    or search_text in (games_by_key[key].rom_filename or "").lower()
+                )
+            ]
         filtered = self._sort_keys(filtered)
         self._visible_keys = filtered
 

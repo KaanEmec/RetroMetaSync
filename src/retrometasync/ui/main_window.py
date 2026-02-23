@@ -4,20 +4,29 @@ from pathlib import Path
 from queue import Empty, Queue
 import threading
 import time
+import tkinter.messagebox as messagebox
 import tkinter.filedialog as filedialog
 
 import customtkinter as ctk
 
 from retrometasync.core.conversion import ConversionEngine, ConversionRequest, ConversionResult
+from retrometasync.core.conversion.system_mapping_store import (
+    discover_destination_systems,
+    load_system_mapping,
+    save_system_mapping,
+    suggest_system_mapping,
+)
 from retrometasync.core import LibraryDetector, LibraryNormalizer
 from retrometasync.core.asset_verifier import verify_unchecked_assets
 from retrometasync.core.detection import DetectionResult
 from retrometasync.core.models import Game, Library
 from retrometasync.core.normalizer import NormalizationResult
 from retrometasync.ui.convert_dialog import ConvertPane
+from retrometasync.ui.duplicate_conflict_dialog import show_duplicate_conflict_dialog
 from retrometasync.ui.game_list import GameListPane
 from retrometasync.ui.library_view import LibraryView
 from retrometasync.ui.progress_log import ProgressLog
+from retrometasync.ui.system_mapping_dialog import show_system_mapping_dialog
 
 
 class MainWindow(ctk.CTk):
@@ -289,6 +298,70 @@ class MainWindow(ctk.CTk):
         output_root = Path(output_text)
         target = self.convert_pane.get_target()
 
+        try:
+            source_systems = sorted(selected_games.keys())
+            saved_mapping = load_system_mapping(output_root, target)
+            # If every selected source system is already mapped for this target/output root,
+            # reuse those mappings directly and skip the mapping dialog.
+            has_complete_saved_mapping = all(
+                source_system in saved_mapping and saved_mapping[source_system].strip()
+                for source_system in source_systems
+            )
+            if has_complete_saved_mapping:
+                system_mapping = {source_system: saved_mapping[source_system].strip() for source_system in source_systems}
+            else:
+                destination_snapshot = discover_destination_systems(output_root, target)
+                suggested_mapping = suggest_system_mapping(
+                    source_systems=source_systems,
+                    destination_systems=destination_snapshot.systems,
+                    previous_mapping=saved_mapping,
+                )
+                system_mapping = show_system_mapping_dialog(
+                    master=self,
+                    source_systems=source_systems,
+                    destination_systems=destination_snapshot.systems,
+                    suggested_mapping=suggested_mapping,
+                )
+                if system_mapping is None:
+                    self._set_status("Conversion cancelled during system mapping step.")
+                    return
+                save_system_mapping(output_root, target, system_mapping)
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Failed to prepare system mapping: {exc}", is_error=True)
+            return
+
+        preflight_request = ConversionRequest(
+            library=self.current_library,
+            selected_games=selected_games,
+            target_ecosystem=target,
+            output_root=output_root,
+            export_dat=self.convert_pane.should_export_dat(),
+            dry_run=self.convert_pane.is_dry_run(),
+            overwrite_existing=self.convert_pane.should_overwrite_existing(),
+            merge_existing_metadata=self.convert_pane.should_merge_existing_metadata(),
+            system_mapping=system_mapping,
+        )
+        try:
+            duplicate_conflicts = self.converter.preview_duplicate_conflicts(preflight_request)
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Failed duplicate preflight: {exc}", is_error=True)
+            return
+        conflict_decisions: dict[str, str] = {}
+        if duplicate_conflicts:
+            response = messagebox.askyesno(
+                title="Duplicate Conflicts Found",
+                message=f"Detected {len(duplicate_conflicts)} duplicate game conflict(s). Resolve now?",
+                parent=self,
+            )
+            if not response:
+                self._set_status("Conversion cancelled before duplicate conflict resolution.")
+                return
+            decisions = show_duplicate_conflict_dialog(self, duplicate_conflicts)
+            if decisions is None:
+                self._set_status("Conversion cancelled during duplicate conflict resolution.")
+                return
+            conflict_decisions = decisions
+
         self._conversion_running = True
         self.convert_pane.set_busy(True)
         self._set_global_busy(True)
@@ -309,6 +382,8 @@ class MainWindow(ctk.CTk):
             dry_run=self.convert_pane.is_dry_run(),
             overwrite_existing=self.convert_pane.should_overwrite_existing(),
             merge_existing_metadata=self.convert_pane.should_merge_existing_metadata(),
+            system_mapping=system_mapping,
+            conflict_decisions=conflict_decisions,
         )
         worker = threading.Thread(target=self._convert_worker, args=(request,), daemon=True)
         worker.start()

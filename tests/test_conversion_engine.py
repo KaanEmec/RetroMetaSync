@@ -10,6 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from retrometasync.core.conversion import ConversionEngine, ConversionRequest
 from retrometasync.core.conversion.engine import _relative_for_es
+from retrometasync.core.conversion.system_mapping_store import (
+    discover_destination_systems,
+    load_system_mapping,
+    save_system_mapping,
+)
 from retrometasync.core.models import Asset, AssetType, AssetVerificationState, Game, Library, MetadataSource, System
 
 
@@ -512,6 +517,221 @@ class ConversionEngineTests(unittest.TestCase):
             self.assertEqual(titles_by_app.get("Games/NES/Contra.nes"), "Contra New")
             self.assertEqual(titles_by_app.get("Games/NES/Ice Climber.nes"), "Ice Climber")
             self.assertEqual(titles_by_app.get("Games/NES/Duck Tales.nes"), "Duck Tales")
+
+    def test_system_mapping_routes_multiple_source_systems_into_one_destination_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_a = source_root / "Mega Man X.sfc"
+            rom_b = source_root / "Super Metroid.sfc"
+            rom_a.write_bytes(b"a")
+            rom_b.write_bytes(b"b")
+
+            system_a = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=source_root,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            system_b = System(
+                system_id="super_nintendo",
+                display_name="Super Nintendo",
+                rom_root=source_root,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            game_a = Game(rom_path=rom_a, system_id="snes", title="Mega Man X")
+            game_b = Game(rom_path=rom_b, system_id="super_nintendo", title="Super Metroid")
+            library = Library(
+                source_root=source_root,
+                systems={"snes": system_a, "super_nintendo": system_b},
+                games_by_system={"snes": [game_a], "super_nintendo": [game_b]},
+            )
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game_a], "super_nintendo": [game_b]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+                system_mapping={"super_nintendo": "snes"},
+            )
+            ConversionEngine().convert(request)
+
+            self.assertTrue((output_root / "roms" / "snes" / "Mega Man X.sfc").exists())
+            self.assertTrue((output_root / "roms" / "snes" / "Super Metroid.sfc").exists())
+            self.assertTrue((output_root / "roms" / "snes" / "gamelist.xml").exists())
+            self.assertFalse((output_root / "roms" / "super_nintendo").exists())
+
+    def test_system_mapping_persistence_in_output_root_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            mapping = {"super_nintendo": "snes", "nes": "Nintendo Entertainment System"}
+            save_system_mapping(output_root, "batocera", mapping)
+            loaded = load_system_mapping(output_root, "batocera")
+            self.assertEqual(loaded, mapping)
+
+    def test_discover_destination_systems_reads_existing_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "output"
+            (output_root / "roms" / "snes").mkdir(parents=True, exist_ok=True)
+            (output_root / "roms" / "megadrive").mkdir(parents=True, exist_ok=True)
+            snapshot = discover_destination_systems(output_root, "batocera")
+            self.assertEqual(snapshot.systems, ["megadrive", "snes"])
+
+    def test_preview_duplicate_conflicts_matches_normalized_titles_and_rom_basename_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_a = source_root / "Street Fighter II.sfc"
+            rom_b = source_root / "Chrono Trigger.sfc"
+            rom_a.write_bytes(b"a")
+            rom_b.write_bytes(b"b")
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=source_root,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            game_a = Game(rom_path=rom_a, system_id="snes", title="street fighter ii")
+            game_b = Game(rom_path=rom_b, system_id="snes", title="")
+            library = Library(source_root=source_root, systems={"snes": system}, games_by_system={"snes": [game_a, game_b]})
+
+            gamelist_path = output_root / "roms" / "snes" / "gamelist.xml"
+            gamelist_path.parent.mkdir(parents=True, exist_ok=True)
+            gamelist_path.write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./Street Fighter II (USA) [v1.0].sfc</path>
+    <name>Street Fighter II (USA) [v1.0]</name>
+  </game>
+  <game>
+    <path>./Chrono Trigger.sfc</path>
+    <name>Chrono Trigger</name>
+  </game>
+</gameList>
+""",
+                encoding="utf-8",
+            )
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game_a, game_b]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+            )
+            conflicts = ConversionEngine().preview_duplicate_conflicts(request)
+            self.assertEqual(len(conflicts), 2)
+            self.assertTrue(any(conflict.game_title == "street fighter ii" for conflict in conflicts))
+            self.assertTrue(any(conflict.rom_filename == "Chrono Trigger.sfc" for conflict in conflicts))
+
+    def test_keep_existing_conflict_decision_skips_new_copy_and_keeps_existing_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_new = source_root / "F-Zero.sfc"
+            rom_new.write_bytes(b"new")
+            existing_rom = output_root / "roms" / "snes" / "F-Zero-old.sfc"
+            existing_rom.parent.mkdir(parents=True, exist_ok=True)
+            existing_rom.write_bytes(b"old")
+            gamelist_path = output_root / "roms" / "snes" / "gamelist.xml"
+            gamelist_path.write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./F-Zero-old.sfc</path>
+    <name>F-Zero</name>
+  </game>
+</gameList>
+""",
+                encoding="utf-8",
+            )
+
+            system = System(system_id="snes", display_name="SNES", rom_root=source_root, metadata_source=MetadataSource.GAMELIST_XML)
+            game = Game(rom_path=rom_new, system_id="snes", title="F-Zero")
+            library = Library(source_root=source_root, systems={"snes": system}, games_by_system={"snes": [game]})
+            engine = ConversionEngine()
+            base_request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+            )
+            conflicts = engine.preview_duplicate_conflicts(base_request)
+            self.assertEqual(len(conflicts), 1)
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+                conflict_decisions={conflicts[0].key: "keep_existing"},
+            )
+            result = engine.convert(request)
+            self.assertEqual(result.games_processed, 0)
+            self.assertFalse((output_root / "roms" / "snes" / "F-Zero.sfc").exists())
+            names = [node.findtext("name") for node in ET.parse(gamelist_path).getroot().findall("game")]
+            self.assertIn("F-Zero", names)
+
+    def test_keep_new_conflict_decision_replaces_existing_title_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_new = source_root / "F-Zero.sfc"
+            rom_new.write_bytes(b"new")
+            gamelist_path = output_root / "roms" / "snes" / "gamelist.xml"
+            gamelist_path.parent.mkdir(parents=True, exist_ok=True)
+            gamelist_path.write_text(
+                """<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./F-Zero-old.sfc</path>
+    <name>F-Zero (USA) [v1.0]</name>
+  </game>
+</gameList>
+""",
+                encoding="utf-8",
+            )
+
+            system = System(system_id="snes", display_name="SNES", rom_root=source_root, metadata_source=MetadataSource.GAMELIST_XML)
+            game = Game(rom_path=rom_new, system_id="snes", title="F-Zero")
+            library = Library(source_root=source_root, systems={"snes": system}, games_by_system={"snes": [game]})
+            engine = ConversionEngine()
+            base_request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+            )
+            conflicts = engine.preview_duplicate_conflicts(base_request)
+            self.assertEqual(len(conflicts), 1)
+
+            request = ConversionRequest(
+                library=library,
+                selected_games={"snes": [game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+                conflict_decisions={conflicts[0].key: "keep_new"},
+            )
+            result = engine.convert(request)
+            self.assertEqual(result.games_processed, 1)
+            self.assertTrue((output_root / "roms" / "snes" / "F-Zero.sfc").exists())
+
+            paths = [node.findtext("path") for node in ET.parse(gamelist_path).getroot().findall("game")]
+            self.assertIn("./F-Zero.sfc", paths)
+            self.assertNotIn("./F-Zero-old.sfc", paths)
 
 
 if __name__ == "__main__":
