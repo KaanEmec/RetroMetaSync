@@ -11,13 +11,22 @@ class ConvertPane(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
         self._on_convert = None
+        self.configure(border_width=1, border_color=("#cfd4dc", "#2f3745"))
+        self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=0)
+        # Keep controls near top while reserving flexible space above footer button.
+        self.grid_rowconfigure(4, weight=1)
 
-        self.title_label = ctk.CTkLabel(self, text="Conversion", font=ctk.CTkFont(size=14, weight="bold"))
+        self.title_label = ctk.CTkLabel(
+            self,
+            text="🔄 Conversion",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=("#0f172a", "#f8fafc"),
+        )
         self.title_label.grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 8), sticky="w")
 
-        self.target_label = ctk.CTkLabel(self, text="Target Ecosystem")
+        self.target_label = ctk.CTkLabel(self, text="🎯 Target Ecosystem", text_color=("#111827", "#e5edf7"))
         self.target_label.grid(row=1, column=0, padx=(10, 6), pady=4, sticky="w")
 
         self.target_option = ctk.CTkOptionMenu(
@@ -25,7 +34,7 @@ class ConvertPane(ctk.CTkFrame):
         )
         self.target_option.grid(row=1, column=1, columnspan=2, padx=(0, 10), pady=4, sticky="ew")
 
-        self.output_label = ctk.CTkLabel(self, text="Output Path")
+        self.output_label = ctk.CTkLabel(self, text="📁 Output Path", text_color=("#111827", "#e5edf7"))
         self.output_label.grid(row=2, column=0, padx=(10, 6), pady=4, sticky="w")
 
         self.output_entry = ctk.CTkEntry(self, placeholder_text="Choose conversion output root")
@@ -34,20 +43,32 @@ class ConvertPane(ctk.CTkFrame):
         self.output_browse = ctk.CTkButton(self, text="Browse", width=80, command=self._browse_output)
         self.output_browse.grid(row=2, column=2, padx=(0, 10), pady=4, sticky="e")
 
+        self.options_row = ctk.CTkFrame(self, fg_color="transparent")
+        self.options_row.grid(row=3, column=0, columnspan=3, padx=10, pady=(4, 6), sticky="ew")
+        self.options_row.grid_columnconfigure(0, weight=1)
+        self.options_row.grid_columnconfigure(1, weight=1)
+        self.options_row.grid_columnconfigure(2, weight=1)
+
         self.dry_run_var = ctk.BooleanVar(value=False)
-        self.dry_run_check = ctk.CTkCheckBox(self, text="Dry Run (no file writes)", variable=self.dry_run_var)
-        self.dry_run_check.grid(row=3, column=0, columnspan=2, padx=10, pady=(4, 2), sticky="w")
+        self.dry_run_check = ctk.CTkCheckBox(
+            self.options_row, text="Dry Run (no file writes)", variable=self.dry_run_var
+        )
+        self.dry_run_check.grid(row=0, column=0, padx=(0, 8), pady=0, sticky="w")
 
         self.overwrite_var = ctk.BooleanVar(value=False)
-        self.overwrite_check = ctk.CTkCheckBox(self, text="Overwrite Existing Files", variable=self.overwrite_var)
-        self.overwrite_check.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 6), sticky="w")
+        self.overwrite_check = ctk.CTkCheckBox(
+            self.options_row, text="Overwrite Existing Files", variable=self.overwrite_var
+        )
+        self.overwrite_check.grid(row=0, column=1, padx=(0, 8), pady=0, sticky="w")
 
         self.export_dat_var = ctk.BooleanVar(value=False)
-        self.export_dat_check = ctk.CTkCheckBox(self, text="Export DAT files", variable=self.export_dat_var)
-        self.export_dat_check.grid(row=5, column=0, columnspan=2, padx=10, pady=(0, 6), sticky="w")
+        self.export_dat_check = ctk.CTkCheckBox(
+            self.options_row, text="Export DAT files", variable=self.export_dat_var
+        )
+        self.export_dat_check.grid(row=0, column=2, padx=(0, 0), pady=0, sticky="w")
 
         self.convert_button = ctk.CTkButton(self, text="Start Conversion", state="disabled", command=self._handle_convert)
-        self.convert_button.grid(row=6, column=0, columnspan=3, padx=10, pady=(4, 10), sticky="ew")
+        self.convert_button.grid(row=5, column=0, columnspan=3, padx=10, pady=(4, 10), sticky="ew")
 
     def set_on_convert(self, callback) -> None:
         self._on_convert = callback

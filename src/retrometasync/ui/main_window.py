@@ -49,49 +49,56 @@ class MainWindow(ctk.CTk):
 
         self._build_source_controls()
 
-        self.center_frame = ctk.CTkFrame(self)
-        self.center_frame.grid(row=2, column=0, padx=12, pady=(0, 8), sticky="nsew")
-        self.center_frame.grid_columnconfigure(0, weight=3)
-        self.center_frame.grid_columnconfigure(1, weight=2)
-        self.center_frame.grid_rowconfigure(0, weight=1)
-        self.center_frame.grid_rowconfigure(1, weight=0)
+        # Top section: equal-height dashboard and game list.
+        self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.top_frame.grid(row=2, column=0, padx=12, pady=(0, 8), sticky="nsew")
+        self.top_frame.grid_columnconfigure(0, weight=1)
+        self.top_frame.grid_columnconfigure(1, weight=1)
+        self.top_frame.grid_rowconfigure(0, weight=1)
 
-        self.library_view = LibraryView(self.center_frame)
-        self.library_view.grid(row=0, column=0, rowspan=2, padx=(10, 6), pady=10, sticky="nsew")
+        self.library_view = LibraryView(self.top_frame)
+        self.library_view.grid(row=0, column=0, padx=(0, 6), pady=0, sticky="nsew")
 
-        self.game_list = GameListPane(self.center_frame)
-        self.game_list.grid(row=0, column=1, padx=(6, 10), pady=(10, 6), sticky="nsew")
+        self.game_list = GameListPane(self.top_frame)
+        self.game_list.grid(row=0, column=1, padx=(6, 0), pady=0, sticky="nsew")
 
-        self.convert_pane = ConvertPane(self.center_frame)
-        self.convert_pane.grid(row=1, column=1, padx=(6, 10), pady=(6, 10), sticky="ew")
+        # Bottom section: progress log + conversion side-by-side.
+        self.bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.bottom_frame.grid(row=3, column=0, padx=12, pady=(0, 12), sticky="nsew")
+        self.bottom_frame.grid_columnconfigure(0, weight=2)
+        self.bottom_frame.grid_columnconfigure(1, weight=1)
+        self.bottom_frame.grid_rowconfigure(0, weight=1)
+
+        self.convert_pane = ConvertPane(self.bottom_frame)
+        self.convert_pane.grid(row=0, column=1, padx=(6, 0), pady=0, sticky="nsew")
         self.convert_pane.set_on_convert(self._on_convert)
         self.convert_pane.set_enabled(False)
 
-        self.progress_log = ProgressLog(self)
-        self.progress_log.grid(row=3, column=0, padx=12, pady=(0, 12), sticky="nsew")
+        self.progress_log = ProgressLog(self.bottom_frame)
+        self.progress_log.grid(row=0, column=0, padx=(0, 6), pady=0, sticky="nsew")
 
     def _build_source_controls(self) -> None:
         source_frame = ctk.CTkFrame(self)
         source_frame.grid(row=0, column=0, padx=12, pady=12, sticky="ew")
         source_frame.grid_columnconfigure(1, weight=1)
 
-        label = ctk.CTkLabel(source_frame, text="Source Library Folder")
+        label = ctk.CTkLabel(source_frame, text="📂 Source Library Folder", text_color=("#0f172a", "#f8fafc"))
         label.grid(row=0, column=0, padx=(10, 6), pady=10, sticky="w")
 
         self.source_entry = ctk.CTkEntry(source_frame, placeholder_text="Select your source library root")
         self.source_entry.grid(row=0, column=1, padx=(0, 6), pady=10, sticky="ew")
 
-        self.browse_button = ctk.CTkButton(source_frame, text="Browse", width=90, command=self._on_browse)
+        self.browse_button = ctk.CTkButton(source_frame, text="📁 Browse", width=90, command=self._on_browse)
         self.browse_button.grid(row=0, column=2, padx=(0, 6), pady=10)
 
-        self.analyze_button = ctk.CTkButton(source_frame, text="Analyze Library", command=self._on_analyze)
+        self.analyze_button = ctk.CTkButton(source_frame, text="🔍 Analyze Library", command=self._on_analyze)
         self.analyze_button.grid(row=0, column=3, padx=(0, 10), pady=10)
 
         self.status_label = ctk.CTkLabel(
             self,
             text="Select a source folder and run analysis.",
             anchor="w",
-            text_color=("gray40", "gray75"),
+            text_color=("#1f2937", "#dce5f2"),
         )
         self.status_label.grid(row=1, column=0, padx=14, pady=(0, 8), sticky="ew")
 
@@ -174,7 +181,13 @@ class MainWindow(ctk.CTk):
         library = normalization_result.library
         self.current_library = library
         self.library_view.set_library(library)
-        self.game_list.set_library(library)
+        # Defer game list model build and table population so dashboard paints first.
+        def deferred_game_list() -> None:
+            self.game_list.set_library(
+                library,
+                progress_callback=lambda msg: self.result_queue.put(("analysis_progress", msg)),
+            )
+        self.after(0, deferred_game_list)
 
         self.progress_log.log(
             f"Detected ecosystem: {detection_result.detected_ecosystem} (confidence {detection_result.confidence})"
