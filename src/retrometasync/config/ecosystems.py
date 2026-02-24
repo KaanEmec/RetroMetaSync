@@ -51,14 +51,54 @@ ES_FAMILY_TAG_TO_ASSET_TYPE: dict[str, AssetType] = {
 }
 
 
-# Batocera suffix style mapping from reference.
+# Batocera/ES-family local-art suffix style mapping.
+#
+# The values include documented conventions and common community aliases so media
+# can be recognized across mixed libraries and themes.
 BATOCERA_SUFFIX_TO_ASSET_TYPE: dict[str, AssetType] = {
     "-image": AssetType.BOX_FRONT,
+    "-box": AssetType.BOX_FRONT,
+    "-boxart": AssetType.BOX_FRONT,
+    "-cover": AssetType.BOX_FRONT,
+    "-covers": AssetType.BOX_FRONT,
     "-thumb": AssetType.SCREENSHOT_GAMEPLAY,
+    "-screenshot": AssetType.SCREENSHOT_GAMEPLAY,
+    "-screenshots": AssetType.SCREENSHOT_GAMEPLAY,
+    "-screen": AssetType.SCREENSHOT_GAMEPLAY,
+    "-screenhot": AssetType.SCREENSHOT_GAMEPLAY,
+    "-shot": AssetType.SCREENSHOT_GAMEPLAY,
+    "-snap": AssetType.SCREENSHOT_GAMEPLAY,
+    "-snaps": AssetType.SCREENSHOT_GAMEPLAY,
+    "-gameplay": AssetType.SCREENSHOT_GAMEPLAY,
+    "-titleshot": AssetType.SCREENSHOT_TITLE,
+    "-titlescreen": AssetType.SCREENSHOT_TITLE,
+    "-title": AssetType.SCREENSHOT_TITLE,
+    "-title-screen": AssetType.SCREENSHOT_TITLE,
     "-marquee": AssetType.MARQUEE,
-    "-video": AssetType.VIDEO,
+    "-logo": AssetType.LOGO,
+    "-clearlogo": AssetType.LOGO,
+    "-wheel": AssetType.WHEEL,
+    "-fanart": AssetType.FANART,
+    "-background": AssetType.BACKGROUND,
+    "-backdrop": AssetType.BACKGROUND,
     "-bezel": AssetType.BEZEL,
+    "-miximage": AssetType.MIXIMAGE,
+    "-video": AssetType.VIDEO,
+    "-manual": AssetType.MANUAL,
 }
+
+# Heuristic aliases for suffix detection in addition to explicit known keys.
+MEDIA_SUFFIX_HEURISTIC_GROUPS: dict[AssetType, tuple[str, ...]] = {
+    AssetType.SCREENSHOT_TITLE: ("titleshot", "titlescreen", "title", "title-screen"),
+    AssetType.SCREENSHOT_GAMEPLAY: ("screenshot", "screenshots", "screen", "shot", "snap", "gameplay"),
+    AssetType.MARQUEE: ("marquee", "logo", "clearlogo", "wheel", "banner"),
+    AssetType.FANART: ("fanart", "background", "backdrop", "wallpaper"),
+}
+
+# Longest-first ordering to avoid partial matches (e.g. -title before -titlescreen).
+MEDIA_SUFFIX_ORDERED: tuple[str, ...] = tuple(
+    sorted(BATOCERA_SUFFIX_TO_ASSET_TYPE.keys(), key=len, reverse=True)
+)
 
 
 # ES-DE downloaded_media folder mapping to normalized asset types.

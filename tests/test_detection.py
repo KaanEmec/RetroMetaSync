@@ -84,6 +84,17 @@ class DetectionTests(unittest.TestCase):
             result = LibraryDetector().detect(root)
             self.assertEqual(result.detected_ecosystem, "muos")
 
+    def test_detects_batocera_when_extended_suffix_media_is_present(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nes_dir = root / "roms" / "nes"
+            nes_dir.mkdir(parents=True, exist_ok=True)
+            (nes_dir / "gamelist.xml").write_text("<gameList></gameList>", encoding="utf-8")
+            (nes_dir / "Mario-fanart.png").write_bytes(b"img")
+
+            result = LibraryDetector().detect(root)
+            self.assertEqual(result.detected_ecosystem, "batocera")
+
 
 if __name__ == "__main__":
     unittest.main()

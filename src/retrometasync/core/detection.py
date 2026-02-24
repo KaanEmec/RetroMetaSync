@@ -4,9 +4,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from retrometasync.config.ecosystems import ECOSYSTEMS, SIGNATURE_HINTS
+from retrometasync.config.ecosystems import BATOCERA_SUFFIX_TO_ASSET_TYPE, ECOSYSTEMS, SIGNATURE_HINTS
 from retrometasync.config.system_aliases import canonicalize_system_id
 from retrometasync.core.models import Library, MetadataSource, System
+
+
+class DetectionCancelled(Exception):
+    """Raised when library detection is cancelled by the user."""
+
 
 ROM_EXTENSIONS: set[str] = {
     ".zip",
@@ -123,6 +128,7 @@ class LibraryDetector:
 
     def __init__(self) -> None:
         self._progress_callback = None
+        self._cancel_requested: Callable[[], bool] | None = None
         self._has_any_cache: dict[tuple[str, str], bool] = {}
         self._has_dir_named_cache: dict[tuple[str, str], bool] = {}
         self._system_dir_scan_cache: dict[str, bool] = {}
@@ -133,25 +139,54 @@ class LibraryDetector:
         progress_callback: Callable[[str], None] | None = None,
         preferred_ecosystem: str | None = None,
         scan_mode: str = "deep",
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> DetectionResult:
         self._progress_callback = progress_callback
+        self._cancel_requested = cancel_requested
         self._has_any_cache.clear()
         self._has_dir_named_cache.clear()
         self._system_dir_scan_cache.clear()
         selected_root = source_root.expanduser().resolve()
         normalized_scan_mode = (scan_mode or "deep").strip().lower()
         preferred = (preferred_ecosystem or "").strip().lower() or None
+        self._check_cancel()
 
         if normalized_scan_mode == "single_rom_folder":
             return self._single_rom_folder_result(selected_root, normalized_scan_mode)
 
+        launchbox_root = self._launchbox_root_from_selected(selected_root)
+        if normalized_scan_mode == "meta":
+            root = launchbox_root or selected_root
+            self._emit(progress_callback, f"[detect] Metadata-only scan root: {root}")
+            facts = self._scan_facts_meta(root)
+            scores = self._score_ecosystems(root, facts)
+            ecosystem = self._classify_ecosystem(facts, scores)
+            family = self._family_for_ecosystem(ecosystem)
+            confidence = self._confidence_for(ecosystem, scores)
+            systems = self._enumerate_systems_meta(root, ecosystem, facts)
+            warnings = self._build_warnings(facts, ecosystem)
+            self._emit(
+                progress_callback,
+                f"[detect] Meta ecosystem={ecosystem}, family={family}, confidence={confidence}, systems={len(systems)}",
+            )
+            return DetectionResult(
+                source_root=root,
+                detected_ecosystem=ecosystem,
+                detected_family=family,
+                confidence=confidence,
+                ecosystem_scores=scores,
+                systems=systems,
+                warnings=warnings,
+                scan_mode=normalized_scan_mode,
+            )
+
+        self._check_cancel()
         preferred_result = self._detect_from_preference(selected_root, preferred)
         if preferred_result is not None:
             self._emit(progress_callback, f"[detect] Preferred source mode '{preferred}' accepted.")
             preferred_result.scan_mode = normalized_scan_mode
             return preferred_result
 
-        launchbox_root = self._launchbox_root_from_selected(selected_root)
         # If caller explicitly picks LaunchBox mode, trust that hint and bypass heavy generic probing.
         if (preferred_ecosystem == "launchbox" or normalized_scan_mode == "launchbox") and launchbox_root is not None:
             root = launchbox_root
@@ -180,6 +215,7 @@ class LibraryDetector:
             )
 
         root = launchbox_root or selected_root
+        self._check_cancel()
         quick_result = self._auto_fast_detect(root)
         if quick_result is not None:
             ecosystem, quick_facts = quick_result
@@ -199,11 +235,14 @@ class LibraryDetector:
             )
 
         self._emit(progress_callback, f"[detect] Scanning root: {root}")
+        self._check_cancel()
         facts = self._scan_facts(root)
+        self._check_cancel()
         scores = self._score_ecosystems(root, facts)
         ecosystem = self._classify_ecosystem(facts, scores)
         family = self._family_for_ecosystem(ecosystem)
         confidence = self._confidence_for(ecosystem, scores)
+        self._check_cancel()
         systems = self._enumerate_systems(root, ecosystem, facts)
         warnings = self._build_warnings(facts, ecosystem)
         self._emit(
@@ -247,6 +286,7 @@ class LibraryDetector:
 
     def _scan_facts(self, root: Path) -> _ScanFacts:
         facts = _ScanFacts()
+        self._check_cancel()
 
         # LaunchBox fast-path: avoid deep recursive scans for huge NAS roots.
         launchbox_root = self._launchbox_root_from_selected(root)
@@ -271,13 +311,43 @@ class LibraryDetector:
         facts.has_miyoo_gamelist = self._has_any(root, "miyoogamelist.xml")
         facts.has_gamelist_xml = self._has_any(root, "gamelist.xml")
         facts.has_onion_imgs_dir = self._path_exists(root / "Roms") and self._has_dir_named(root / "Roms", "Imgs")
-        facts.has_batocera_suffix_media = self._has_any(root, "*-image.png") or self._has_any(
-            root, "*-marquee.png"
+        facts.has_batocera_suffix_media = any(
+            self._has_any(root, f"*{suffix}.*") for suffix in BATOCERA_SUFFIX_TO_ASSET_TYPE
         )
         facts.has_retrobat_deep_images = self._path_exists(root / "roms") and (
             self._has_dir_named(root / "roms", "boxart") or self._has_dir_named(root / "roms", "wheel")
         )
 
+        return facts
+
+    def _scan_facts_meta(self, root: Path) -> _ScanFacts:
+        facts = _ScanFacts()
+        self._check_cancel()
+
+        launchbox_root = self._launchbox_root_from_selected(root)
+        if launchbox_root is not None:
+            facts.has_launchbox_platforms = True
+            facts.has_launchbox_images = self._path_exists(launchbox_root / "Images")
+            facts.launchbox_root = launchbox_root
+            return facts
+
+        facts.has_romlists_dir = self._path_exists(root / "romlists")
+        facts.has_es_de_gamelists = self._path_exists(root / "ES-DE" / "gamelists")
+        facts.has_es_de_downloaded_media = self._path_exists(root / "ES-DE" / "downloaded_media")
+        facts.has_muos_catalogue = self._path_exists(root / "MUOS" / "info" / "catalogue")
+        facts.has_emulationstation_home = self._path_exists(root / ".emulationstation")
+        facts.has_userdata_roms = self._path_exists(root / "userdata" / "roms")
+        facts.has_attract_cfg = self._path_exists(root / "attract.cfg")
+        facts.has_retrobat_ini = self._path_exists(root / "retrobat.ini")
+
+        roms_root = root / "Roms"
+        facts.has_onion_imgs_dir = self._path_exists(roms_root / "Imgs")
+        facts.has_miyoo_gamelist = self._any_glob(roms_root, "*/miyoogamelist.xml")
+        facts.has_lpl = self._any_glob(root / "playlists", "*.lpl") or self._any_glob(root, "*.lpl")
+        facts.has_pegasus_metadata = self._path_exists(root / "metadata.pegasus.txt") or self._any_glob(
+            root, "*/metadata.pegasus.txt"
+        )
+        facts.has_gamelist_xml = bool(self._collect_gamelists_meta(root))
         return facts
 
     def _detect_from_preference(self, selected_root: Path, preferred_ecosystem: str | None) -> DetectionResult | None:
@@ -493,6 +563,23 @@ class LibraryDetector:
         # Default: ES-family detection by per-system gamelist folders.
         return self._systems_from_es_family(root, facts)
 
+    def _enumerate_systems_meta(self, root: Path, ecosystem: str, facts: _ScanFacts) -> list[System]:
+        if ecosystem == "launchbox":
+            return self._systems_from_launchbox(root)
+        if ecosystem == "es_de":
+            return self._systems_from_es_de(root)
+        if ecosystem == "retroarch":
+            return self._systems_from_retroarch_meta(root)
+        if ecosystem == "attract_mode":
+            return self._systems_from_attract_mode(root)
+        if ecosystem == "onionos":
+            return self._systems_from_onion_meta(root)
+        if ecosystem == "muos":
+            return self._systems_from_muos(root)
+        if ecosystem == "pegasus":
+            return self._systems_from_pegasus_meta(root)
+        return self._systems_from_es_family_meta(root, facts)
+
     def _systems_from_es_family(self, root: Path, facts: _ScanFacts) -> list[System]:
         systems: list[System] = []
         seen_ids: set[str] = set()
@@ -501,6 +588,7 @@ class LibraryDetector:
         if gamelist_files:
             self._emit(self._progress_callback, f"[detect] Found {len(gamelist_files)} gamelist.xml files.")
         for gamelist_path in gamelist_files:
+            self._check_cancel()
             system_dir = gamelist_path.parent
             if system_dir.name.lower() in {"gamelists", "metadata"}:
                 continue
@@ -523,8 +611,10 @@ class LibraryDetector:
 
         # Also include metadata-light systems inferred from real directories.
         for roms_root in self._candidate_rom_roots(root):
+            self._check_cancel()
             self._emit(self._progress_callback, f"[detect] Scanning candidate ROM root: {roms_root}")
             for child in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+                self._check_cancel()
                 if not self._looks_like_system_dir(child):
                     continue
                 if child.name.lower() in {"images", "videos", "manuals"}:
@@ -545,6 +635,32 @@ class LibraryDetector:
                 self._emit(self._progress_callback, f"[detect] Detected system folder: {child}")
         return sorted(systems, key=lambda item: item.system_id)
 
+    def _systems_from_es_family_meta(self, root: Path, facts: _ScanFacts) -> list[System]:
+        systems: list[System] = []
+        seen_ids: set[str] = set()
+        gamelist_files = self._collect_gamelists_meta(root)
+        if gamelist_files:
+            self._emit(self._progress_callback, f"[detect] Meta scan found {len(gamelist_files)} gamelist.xml files.")
+        for gamelist_path in gamelist_files:
+            system_dir = gamelist_path.parent
+            if system_dir.name.lower() in {"gamelists", "metadata"}:
+                continue
+            system_id = canonicalize_system_id(system_dir.name)
+            if system_id in seen_ids:
+                continue
+            seen_ids.add(system_id)
+            systems.append(
+                System(
+                    system_id=system_id,
+                    display_name=system_dir.name,
+                    rom_root=system_dir,
+                    metadata_source=MetadataSource.GAMELIST_XML,
+                    metadata_paths=[gamelist_path],
+                    detected_ecosystem="batocera" if facts.has_batocera_suffix_media else "es_classic",
+                )
+            )
+        return sorted(systems, key=lambda item: item.system_id)
+
     def _systems_from_es_de(self, root: Path) -> list[System]:
         systems: list[System] = []
         seen_ids: set[str] = set()
@@ -552,6 +668,7 @@ class LibraryDetector:
         if gamelists_root.exists():
             self._emit(self._progress_callback, f"[detect] ES-DE gamelist root found: {gamelists_root}")
             for system_dir in sorted(path for path in gamelists_root.iterdir() if path.is_dir()):
+                self._check_cancel()
                 gamelist_path = system_dir / "gamelist.xml"
                 system_id = canonicalize_system_id(system_dir.name)
                 seen_ids.add(system_id)
@@ -567,8 +684,10 @@ class LibraryDetector:
                 )
 
         for roms_root in self._candidate_rom_roots(root):
+            self._check_cancel()
             self._emit(self._progress_callback, f"[detect] ES-DE fallback ROM scan root: {roms_root}")
             for child in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+                self._check_cancel()
                 if not self._looks_like_system_dir(child):
                     continue
                 system_id = canonicalize_system_id(child.name)
@@ -596,6 +715,7 @@ class LibraryDetector:
             return systems
 
         for xml_path in sorted(platforms_root.glob("*.xml")):
+            self._check_cancel()
             system_name = xml_path.stem
             systems.append(
                 System(
@@ -612,6 +732,23 @@ class LibraryDetector:
     def _systems_from_retroarch(self, root: Path) -> list[System]:
         systems: list[System] = []
         for lpl_path in self._collect_matches(root, "*.lpl", max_results=3000):
+            self._check_cancel()
+            system_name = lpl_path.stem
+            systems.append(
+                System(
+                    system_id=canonicalize_system_id(system_name),
+                    display_name=system_name,
+                    rom_root=lpl_path.parent,
+                    metadata_source=MetadataSource.RETROARCH_LPL,
+                    metadata_paths=[lpl_path],
+                    detected_ecosystem="retroarch",
+                )
+            )
+        return systems
+
+    def _systems_from_retroarch_meta(self, root: Path) -> list[System]:
+        systems: list[System] = []
+        for lpl_path in self._collect_retroarch_playlists_meta(root):
             system_name = lpl_path.stem
             systems.append(
                 System(
@@ -632,6 +769,7 @@ class LibraryDetector:
             return systems
 
         for txt_path in sorted(romlists_root.glob("*.txt")):
+            self._check_cancel()
             system_name = txt_path.stem
             systems.append(
                 System(
@@ -652,6 +790,7 @@ class LibraryDetector:
             return systems
 
         for system_dir in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+            self._check_cancel()
             miyoo_path = system_dir / "miyoogamelist.xml"
             systems.append(
                 System(
@@ -665,6 +804,29 @@ class LibraryDetector:
             )
         return systems
 
+    def _systems_from_onion_meta(self, root: Path) -> list[System]:
+        systems: list[System] = []
+        roms_root = root / "Roms"
+        if not roms_root.exists():
+            return systems
+
+        for system_dir in sorted(path for path in roms_root.iterdir() if path.is_dir()):
+            self._check_cancel()
+            miyoo_path = system_dir / "miyoogamelist.xml"
+            if not miyoo_path.exists():
+                continue
+            systems.append(
+                System(
+                    system_id=canonicalize_system_id(system_dir.name),
+                    display_name=system_dir.name,
+                    rom_root=system_dir,
+                    metadata_source=MetadataSource.MIYOO_GAMELIST,
+                    metadata_paths=[miyoo_path],
+                    detected_ecosystem="onionos",
+                )
+            )
+        return systems
+
     def _systems_from_muos(self, root: Path) -> list[System]:
         systems: list[System] = []
         catalogue_root = root / "MUOS" / "info" / "catalogue"
@@ -672,6 +834,7 @@ class LibraryDetector:
             return systems
 
         for system_dir in sorted(path for path in catalogue_root.iterdir() if path.is_dir()):
+            self._check_cancel()
             systems.append(
                 System(
                     system_id=canonicalize_system_id(system_dir.name),
@@ -687,6 +850,23 @@ class LibraryDetector:
     def _systems_from_pegasus(self, root: Path) -> list[System]:
         systems: list[System] = []
         for metadata_file in self._collect_matches(root, "metadata.pegasus.txt", max_results=3000):
+            self._check_cancel()
+            system_dir = metadata_file.parent
+            systems.append(
+                System(
+                    system_id=canonicalize_system_id(system_dir.name),
+                    display_name=system_dir.name,
+                    rom_root=system_dir,
+                    metadata_source=MetadataSource.METADATA_PEGASUS,
+                    metadata_paths=[metadata_file],
+                    detected_ecosystem="pegasus",
+                )
+            )
+        return systems
+
+    def _systems_from_pegasus_meta(self, root: Path) -> list[System]:
+        systems: list[System] = []
+        for metadata_file in self._collect_pegasus_metadata_meta(root):
             system_dir = metadata_file.parent
             systems.append(
                 System(
@@ -730,7 +910,11 @@ class LibraryDetector:
         cache_key = (root.resolve().as_posix().lower(), pattern)
         if cache_key in self._has_any_cache:
             return self._has_any_cache[cache_key]
-        value = next(root.rglob(pattern), None) is not None
+        value = False
+        for _ in root.rglob(pattern):
+            self._check_cancel()
+            value = True
+            break
         self._has_any_cache[cache_key] = value
         return value
 
@@ -740,6 +924,7 @@ class LibraryDetector:
             return self._has_dir_named_cache[cache_key]
         directory_name = directory_name.lower()
         for path in root.rglob("*"):
+            self._check_cancel()
             if path.is_dir() and path.name.lower() == directory_name:
                 self._has_dir_named_cache[cache_key] = True
                 return True
@@ -784,6 +969,7 @@ class LibraryDetector:
         file_budget = 2500
         scanned = 0
         for file_path in path.rglob("*"):
+            self._check_cancel()
             if not file_path.is_file():
                 continue
             scanned += 1
@@ -798,7 +984,87 @@ class LibraryDetector:
     def _collect_matches(self, root: Path, pattern: str, max_results: int) -> list[Path]:
         results: list[Path] = []
         for path in root.rglob(pattern):
+            self._check_cancel()
             results.append(path)
             if len(results) >= max_results:
                 break
         return sorted(results)
+
+    def _collect_gamelists_meta(self, root: Path) -> list[Path]:
+        candidates = [
+            root,
+            root / "roms",
+            root / "Roms",
+            root / "ES-DE" / "gamelists",
+            root / ".emulationstation" / "gamelists",
+        ]
+        seen: set[str] = set()
+        matches: list[Path] = []
+        for candidate in candidates:
+            if not candidate.exists() or not candidate.is_dir():
+                continue
+            direct = candidate / "gamelist.xml"
+            if direct.exists():
+                key = direct.resolve().as_posix().lower()
+                if key not in seen:
+                    seen.add(key)
+                    matches.append(direct.resolve())
+            for child in sorted(path for path in candidate.iterdir() if path.is_dir()):
+                self._check_cancel()
+                gamelist = child / "gamelist.xml"
+                if not gamelist.exists():
+                    continue
+                key = gamelist.resolve().as_posix().lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(gamelist.resolve())
+        return sorted(matches)
+
+    def _collect_retroarch_playlists_meta(self, root: Path) -> list[Path]:
+        seen: set[str] = set()
+        matches: list[Path] = []
+        for candidate in (root / "playlists", root):
+            if not candidate.exists() or not candidate.is_dir():
+                continue
+            for lpl_path in sorted(candidate.glob("*.lpl")):
+                self._check_cancel()
+                key = lpl_path.resolve().as_posix().lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(lpl_path.resolve())
+        return matches
+
+    def _collect_pegasus_metadata_meta(self, root: Path) -> list[Path]:
+        seen: set[str] = set()
+        matches: list[Path] = []
+        direct = root / "metadata.pegasus.txt"
+        if direct.exists():
+            key = direct.resolve().as_posix().lower()
+            seen.add(key)
+            matches.append(direct.resolve())
+        if root.exists() and root.is_dir():
+            for child in sorted(path for path in root.iterdir() if path.is_dir()):
+                self._check_cancel()
+                metadata_file = child / "metadata.pegasus.txt"
+                if not metadata_file.exists():
+                    continue
+                key = metadata_file.resolve().as_posix().lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(metadata_file.resolve())
+        return matches
+
+    @staticmethod
+    def _any_glob(root: Path, pattern: str) -> bool:
+        if not root.exists() or not root.is_dir():
+            return False
+        for _ in root.glob(pattern):
+            return True
+        return False
+
+    def _check_cancel(self) -> None:
+        if self._cancel_requested is not None and self._cancel_requested():
+            raise DetectionCancelled("Analysis cancelled by user.")

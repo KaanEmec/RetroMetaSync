@@ -23,6 +23,8 @@ from retrometasync.ui.table_perf import (
     MAX_TABLE_ROW_HEIGHT,
     MIN_TABLE_FONT_SIZE,
     MIN_TABLE_ROW_HEIGHT,
+    MIN_TABLE_HEADER_FONT_SIZE,
+    TABLE_HEADER_FONT_RATIO,
     get_dpi_scale,
     normalize_row_text,
 )
@@ -205,6 +207,7 @@ def _apply_dark_treeview_style(
     if scale is None:
         scale = get_dpi_scale(widget)
     font_size = max(MIN_TABLE_FONT_SIZE, min(MAX_TABLE_FONT_SIZE, round(BASE_TABLE_FONT_SIZE * scale)))
+    heading_font_size = max(MIN_TABLE_HEADER_FONT_SIZE, round(font_size * TABLE_HEADER_FONT_RATIO))
     row_height = max(MIN_TABLE_ROW_HEIGHT, min(MAX_TABLE_ROW_HEIGHT, round(BASE_TABLE_ROW_HEIGHT * scale)))
     style = ttk.Style(widget)
     style.theme_use("clam")
@@ -221,7 +224,7 @@ def _apply_dark_treeview_style(
         "GameList.Treeview.Heading",
         background="#334155",
         foreground="#f1f5f9",
-        font=("Segoe UI", font_size, "bold"),
+        font=("Segoe UI", heading_font_size, "bold"),
     )
     style.map("GameList.Treeview", background=[("selected", "#475569")], foreground=[("selected", "#f8fafc")])
     return row_height

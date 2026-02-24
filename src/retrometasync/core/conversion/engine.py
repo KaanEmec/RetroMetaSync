@@ -294,6 +294,16 @@ class ConversionEngine:
                         dry_run=request.dry_run,
                         overwrite_existing=request.overwrite_existing,
                     )
+                    self._copy_additional_image_assets(
+                        game=game,
+                        chosen_assets=chosen_assets,
+                        copied_assets=copied_asset_targets,
+                        planned_paths=planned_paths,
+                        result=result,
+                        progress=progress,
+                        dry_run=request.dry_run,
+                        overwrite_existing=request.overwrite_existing,
+                    )
 
                     if "gamelist" in planned_paths:
                         entry = _build_gamelist_entry(game, planned_paths, copied_asset_targets)
@@ -459,6 +469,74 @@ class ConversionEngine:
                 self._log(progress, f"asset copied [{key}] -> {destination}")
         return copied
 
+    def _copy_additional_image_assets(
+        self,
+        game: Game,
+        chosen_assets: dict[str, Asset],
+        copied_assets: dict[str, Path],
+        planned_paths: dict[str, Path],
+        result: ConversionResult,
+        progress: ProgressCallback | None,
+        dry_run: bool,
+        overwrite_existing: bool,
+    ) -> None:
+        occupied_keys = set(copied_assets.keys())
+        chosen_source_keys = {
+            _normalized_path_key(asset.file_path)
+            for key, asset in chosen_assets.items()
+            if key in planned_paths and asset.file_path is not None
+        }
+        images_root = planned_paths.get("images_root")
+
+        for asset in game.assets:
+            if asset.asset_type not in _additional_copy_candidate_asset_types():
+                continue
+            source = asset.file_path
+            if source is None or not source.exists():
+                continue
+            if _normalized_path_key(source) in chosen_source_keys:
+                continue
+
+            target_key = _select_target_key_for_asset(asset.asset_type, planned_paths, occupied_keys)
+            if target_key is not None:
+                candidate_destination = planned_paths[target_key].with_suffix(source.suffix.lower())
+                target_label = target_key
+            elif images_root is not None:
+                candidate_destination = images_root / source.name
+                target_label = "images_root"
+            else:
+                result.files_skipped += 1
+                warning = f"No fallback image destination available for asset: {source}"
+                result.warnings.append(warning)
+                self._log(progress, f"[warn] {warning}")
+                continue
+
+            destination = _resolve_destination_path(
+                candidate_destination,
+                overwrite_existing=overwrite_existing,
+                allow_auto_rename=True,
+            )
+            if destination is None:
+                result.files_skipped += 1
+                warning = f"Asset destination exists and overwrite disabled [extra:{target_label}]: {candidate_destination}"
+                result.warnings.append(warning)
+                self._log(progress, f"[warn] {warning}")
+                continue
+            if destination != candidate_destination:
+                result.files_renamed_due_to_collision += 1
+                self._log(progress, f"[warn] Asset collision resolved for [extra:{target_label}]: {destination.name}")
+            if len(str(destination)) > 240:
+                result.warnings.append(f"Long path risk on Windows: {destination}")
+
+            if dry_run:
+                self._log(progress, f"[dry-run] asset copied [extra:{target_label}] -> {destination}")
+            else:
+                _copy_file(source, destination)
+                self._log(progress, f"asset copied [extra:{target_label}] -> {destination}")
+            result.assets_copied += 1
+            if target_key is not None:
+                occupied_keys.add(target_key)
+
     @staticmethod
     def _log(progress: ProgressCallback | None, message: str) -> None:
         if progress is not None:
@@ -576,10 +654,19 @@ def _pick_assets(game: Game) -> dict[str, Asset]:
     chosen: dict[str, Asset] = {}
 
     for asset in game.assets:
+        folder_hint = _asset_folder_hint(asset)
         if "image" not in chosen and asset.asset_type in IMAGE_TYPES:
             chosen["image"] = asset
         if "thumbnail" not in chosen and asset.asset_type in (AssetType.SCREENSHOT_GAMEPLAY, AssetType.SCREENSHOT_TITLE):
             chosen["thumbnail"] = asset
+        if "image_3dbox" not in chosen and folder_hint == "3dboxes":
+            chosen["image_3dbox"] = asset
+        if "image_back" not in chosen and (folder_hint == "backcovers" or asset.asset_type == AssetType.BOX_BACK):
+            chosen["image_back"] = asset
+        if "image_miximage" not in chosen and (folder_hint == "miximages" or asset.asset_type == AssetType.MIXIMAGE):
+            chosen["image_miximage"] = asset
+        if "thumbnail_title" not in chosen and (folder_hint == "titlescreens" or asset.asset_type == AssetType.SCREENSHOT_TITLE):
+            chosen["thumbnail_title"] = asset
         if "marquee" not in chosen and asset.asset_type in MARQUEE_TYPES:
             chosen["marquee"] = asset
         if "video" not in chosen and asset.asset_type == AssetType.VIDEO:
@@ -592,6 +679,56 @@ def _pick_assets(game: Game) -> dict[str, Asset]:
             chosen["fanart"] = asset
 
     return chosen
+
+
+def _asset_folder_hint(asset: Asset) -> str:
+    if asset.match_key and ":" in asset.match_key:
+        return asset.match_key.split(":", 1)[1].strip().lower()
+    return asset.file_path.parent.name.lower()
+
+
+def _additional_copy_candidate_asset_types() -> set[AssetType]:
+    return set(IMAGE_TYPES + MARQUEE_TYPES + FANART_TYPES + (AssetType.BEZEL,))
+
+
+def _normalized_path_key(path: Path) -> str:
+    return path.resolve().as_posix().lower()
+
+
+def _select_target_key_for_asset(
+    asset_type: AssetType,
+    planned_paths: dict[str, Path],
+    occupied_keys: set[str],
+) -> str | None:
+    for key in _preferred_output_keys_for_asset(asset_type):
+        if key not in planned_paths:
+            continue
+        if key in occupied_keys:
+            continue
+        return key
+    return None
+
+
+def _preferred_output_keys_for_asset(asset_type: AssetType) -> tuple[str, ...]:
+    if asset_type == AssetType.BOX_FRONT:
+        return ("image",)
+    if asset_type == AssetType.BOX_BACK:
+        return ("image_back", "image")
+    if asset_type in {AssetType.BOX_SPINE, AssetType.DISC}:
+        return ("image_3dbox", "image")
+    if asset_type == AssetType.MIXIMAGE:
+        return ("image_miximage", "image")
+    if asset_type == AssetType.SCREENSHOT_TITLE:
+        return ("thumbnail_title", "thumbnail", "image")
+    if asset_type in {AssetType.SCREENSHOT_GAMEPLAY, AssetType.SCREENSHOT_MENU}:
+        return ("thumbnail", "image")
+    if asset_type in {AssetType.MARQUEE, AssetType.WHEEL, AssetType.LOGO}:
+        return ("marquee", "image")
+    if asset_type in {AssetType.FANART, AssetType.BACKGROUND}:
+        return ("fanart", "image")
+    if asset_type == AssetType.BEZEL:
+        return ("bezel", "fanart", "image")
+    return tuple()
 
 
 def _lookup_asset_fallback(
@@ -749,7 +886,18 @@ def _candidate_asset_keys_for_ecosystem(ecosystem: str) -> set[str]:
     if ecosystem in {"es_classic", "batocera", "knulli", "amberelec", "jelos_rocknix", "arkos", "retrobat"}:
         return {"image", "thumbnail", "video", "manual", "marquee", "fanart"}
     if ecosystem in {"es_de", "emudeck", "retrodeck"}:
-        return {"image", "thumbnail", "video", "manual", "marquee", "fanart"}
+        return {
+            "image",
+            "image_3dbox",
+            "image_back",
+            "image_miximage",
+            "thumbnail",
+            "thumbnail_title",
+            "video",
+            "manual",
+            "marquee",
+            "fanart",
+        }
     if ecosystem in {"retroarch", "onionos", "muos"}:
         return {"image", "thumbnail", "video"}
     return set()

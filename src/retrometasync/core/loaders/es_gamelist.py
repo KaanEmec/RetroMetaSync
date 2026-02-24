@@ -5,8 +5,11 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from retrometasync.config.ecosystems import (
+    BATOCERA_SUFFIX_TO_ASSET_TYPE,
     ES_DE_MEDIA_FOLDER_TO_ASSET_TYPE,
     ES_FAMILY_TAG_TO_ASSET_TYPE,
+    MEDIA_SUFFIX_HEURISTIC_GROUPS,
+    MEDIA_SUFFIX_ORDERED,
     RETROARCH_THUMBNAIL_FOLDER_TO_ASSET_TYPE,
 )
 from retrometasync.config.system_aliases import canonicalize_system_id
@@ -109,9 +112,15 @@ class ESGamelistLoader(BaseLoader):
         scan_mode = (load_input.scan_mode or "deep").strip().lower()
         force_mode = scan_mode == "force"
         meta_mode = scan_mode == "meta"
+        quick_mode = scan_mode == "quick"
+        metadata_only_mode = meta_mode or quick_mode
 
         if not systems:
-            systems = self._discover_systems(load_input.source_root)
+            systems = (
+                self._discover_systems_meta(load_input.source_root)
+                if metadata_only_mode
+                else self._discover_systems(load_input.source_root)
+            )
             self._emit(progress, f"[scan] Discovered {len(systems)} systems from filesystem.")
 
         for system in systems:
@@ -140,7 +149,7 @@ class ESGamelistLoader(BaseLoader):
                     games_by_system[system.system_id] = self._parse_gamelist(
                         system,
                         gamelist_path,
-                        deep_mode=not meta_mode,
+                        deep_mode=not metadata_only_mode,
                         max_asset_index_files=load_input.max_asset_index_files,
                         progress_callback=progress,
                         rom_roots=rom_roots,
@@ -148,24 +157,30 @@ class ESGamelistLoader(BaseLoader):
                     )
                 except ET.ParseError as exc:
                     warnings.append(f"Failed to parse {gamelist_path}: {exc}")
-                    games_by_system[system.system_id] = [] if meta_mode else self._scan_games_without_metadata(
+                    if meta_mode:
+                        games_by_system[system.system_id] = []
+                    else:
+                        games_by_system[system.system_id] = self._scan_games_without_metadata(
+                            system,
+                            include_assets=not quick_mode,
+                            max_asset_index_files=load_input.max_asset_index_files,
+                            progress_callback=progress,
+                            rom_roots=rom_roots,
+                            asset_roots=asset_roots,
+                        )
+            else:
+                warnings.append(f"Missing gamelist.xml for system '{system.system_id}'.")
+                if meta_mode:
+                    games_by_system[system.system_id] = []
+                else:
+                    games_by_system[system.system_id] = self._scan_games_without_metadata(
                         system,
-                        include_assets=True,
+                        include_assets=not quick_mode,
                         max_asset_index_files=load_input.max_asset_index_files,
                         progress_callback=progress,
                         rom_roots=rom_roots,
                         asset_roots=asset_roots,
                     )
-            else:
-                warnings.append(f"Missing gamelist.xml for system '{system.system_id}'.")
-                games_by_system[system.system_id] = [] if meta_mode else self._scan_games_without_metadata(
-                    system,
-                    include_assets=True,
-                    max_asset_index_files=load_input.max_asset_index_files,
-                    progress_callback=progress,
-                    rom_roots=rom_roots,
-                    asset_roots=asset_roots,
-                )
 
         return LoaderResult(systems=systems, games_by_system=games_by_system, warnings=warnings)
 
@@ -189,6 +204,53 @@ class ESGamelistLoader(BaseLoader):
                 )
             )
 
+        return sorted(systems, key=lambda item: item.system_id)
+
+    def _discover_systems_meta(self, source_root: Path) -> list[System]:
+        systems: list[System] = []
+        seen: set[str] = set()
+        candidates = [
+            source_root,
+            source_root / "roms",
+            source_root / "Roms",
+            source_root / "ES-DE" / "gamelists",
+            source_root / ".emulationstation" / "gamelists",
+        ]
+        for candidate in candidates:
+            if not candidate.exists() or not candidate.is_dir():
+                continue
+            direct = candidate / "gamelist.xml"
+            if direct.exists():
+                system_dir = direct.parent
+                system_id = canonicalize_system_id(system_dir.name)
+                if system_id not in seen:
+                    seen.add(system_id)
+                    systems.append(
+                        System(
+                            system_id=system_id,
+                            display_name=system_dir.name,
+                            rom_root=system_dir,
+                            metadata_source=MetadataSource.GAMELIST_XML,
+                            metadata_paths=[direct],
+                        )
+                    )
+            for child in sorted(path for path in candidate.iterdir() if path.is_dir()):
+                gamelist_path = child / "gamelist.xml"
+                if not gamelist_path.exists():
+                    continue
+                system_id = canonicalize_system_id(child.name)
+                if system_id in seen:
+                    continue
+                seen.add(system_id)
+                systems.append(
+                    System(
+                        system_id=system_id,
+                        display_name=child.name,
+                        rom_root=child,
+                        metadata_source=MetadataSource.GAMELIST_XML,
+                        metadata_paths=[gamelist_path],
+                    )
+                )
         return sorted(systems, key=lambda item: item.system_id)
 
     @staticmethod
@@ -463,6 +525,13 @@ class ESGamelistLoader(BaseLoader):
     def _infer_asset_type(self, path: Path) -> AssetType:
         stem = path.stem.lower()
         parent = path.parent.name.lower()
+        for suffix in MEDIA_SUFFIX_ORDERED:
+            if stem.endswith(suffix):
+                return BATOCERA_SUFFIX_TO_ASSET_TYPE[suffix]
+        for asset_type, suffix_tokens in MEDIA_SUFFIX_HEURISTIC_GROUPS.items():
+            for token in suffix_tokens:
+                if stem.endswith(f"-{token}") or stem.endswith(f"_{token}"):
+                    return asset_type
         suffix = path.suffix.lower()
         parent_lower_map = {name.lower(): value for name, value in ES_DE_MEDIA_FOLDER_TO_ASSET_TYPE.items()}
         if parent in parent_lower_map:
@@ -475,11 +544,11 @@ class ESGamelistLoader(BaseLoader):
             return AssetType.VIDEO
         if suffix in {".pdf", ".cbz", ".cbr"} or "manual" in parent:
             return AssetType.MANUAL
-        if stem.endswith("-marquee") or "marquee" in parent or "wheel" in parent:
+        if "marquee" in parent or "wheel" in parent:
             return AssetType.MARQUEE
-        if stem.endswith("-thumb") or "thumb" in parent or "screenshot" in parent:
+        if "thumb" in parent or "screenshot" in parent:
             return AssetType.SCREENSHOT_GAMEPLAY
-        if stem.endswith("-bezel"):
+        if "bezel" in parent:
             return AssetType.BEZEL
         if "fanart" in parent:
             return AssetType.FANART
@@ -487,9 +556,15 @@ class ESGamelistLoader(BaseLoader):
 
     @staticmethod
     def _strip_asset_suffix(stem: str) -> str:
-        for suffix in ("-image", "-thumb", "-marquee", "-video", "-bezel", "-fanart", "-manual"):
+        for suffix in MEDIA_SUFFIX_ORDERED:
             if stem.endswith(suffix):
                 return stem[: -len(suffix)]
+        for suffix_tokens in MEDIA_SUFFIX_HEURISTIC_GROUPS.values():
+            for token in suffix_tokens:
+                for separator in ("-", "_"):
+                    candidate = f"{separator}{token}"
+                    if stem.endswith(candidate):
+                        return stem[: -len(candidate)]
         return stem
 
     @staticmethod

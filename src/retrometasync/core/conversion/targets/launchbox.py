@@ -17,6 +17,7 @@ def plan_paths(
     return {
         "rom": output_root / "Games" / system_name / rom_name,
         "platform_xml": output_root / "Data" / "Platforms" / f"{system_name}.xml",
+        "images_root": output_root / "Images" / system_name,
         "image": output_root / "Images" / system_name / "Box - Front" / stem,
         "thumbnail": output_root / "Images" / system_name / "Screenshot - Gameplay" / stem,
         "marquee": output_root / "Images" / system_name / "Clear Logo" / stem,

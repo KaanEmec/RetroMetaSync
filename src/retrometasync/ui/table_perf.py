@@ -66,3 +66,6 @@ MIN_TABLE_ROW_HEIGHT = 28
 MAX_TABLE_ROW_HEIGHT = 56
 MIN_TABLE_FONT_SIZE = 13
 MAX_TABLE_FONT_SIZE = 22
+# Table heading font is intentionally smaller than row text for denser headers.
+TABLE_HEADER_FONT_RATIO = 0.67
+MIN_TABLE_HEADER_FONT_SIZE = 9

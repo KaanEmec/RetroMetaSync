@@ -18,6 +18,7 @@ def plan_paths(
     return {
         "rom": system_root / rom_name,
         "gamelist": system_root / "gamelist.xml",
+        "images_root": system_root / "images",
         "image": system_root / "images" / f"{stem}-image",
         "thumbnail": system_root / "images" / f"{stem}-thumb",
         "marquee": system_root / "images" / f"{stem}-marquee",

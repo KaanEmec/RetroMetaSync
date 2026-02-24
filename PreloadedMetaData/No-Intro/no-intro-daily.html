@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html class="no-js">
+	<head>
+		<meta charset="UTF-8" />
+		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+		<title>DAT-o-MATIC</title>
+		<meta name="description" content="">
+		<meta name="author" content="">
+		<meta name="keywords" content="">
+		<meta name="robots" content="index,follow">
+		<link rel="icon" href="/favicon.ico">
+		<link rel="apple-touch-icon" href="/favicon apple.png">
+		<link rel="stylesheet" href="css/20250522_html5_reset.css">
+		<link rel="stylesheet" href="css/20250522_style.css">
+		<link rel="stylesheet" href="css/20250520_datomatic.css">
+		<link rel="stylesheet" href="css/20250520_update.css" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta http-equiv="cleartype" content="on">
+		<script type="text/javascript">
+			function setTitle( text ) {
+				document.title = text;
+			}
+		</script>
+	</head>
+	        		
+		<body>
+												<div class="center">
+																			<div class="top_linkbar">
+				<div class="linkbar_links">
+					<a target="_blank" href="https://www.no-intro.org">Home</a> | 
+					<a target="_blank" href="https://forum.no-intro.org/index.php">Forums</a> | 
+					<a target="_blank" href="https://wiki.no-intro.org/index.php">Wiki</a> |
+					<a href="mailto:shippa6@hotmail.com">email</a>
+				</div>
+									<div class="linkbar_links">
+						<form action="index.php" method="post">
+															<input type="text" name="username" value="" size="10" />
+								<input type="password" name="password" value="" size="10" />
+								<input type="submit" class="submit" name="login" value="Staff login" />
+													</form>
+					</div>
+							</div>
+			<header id="site-header">
+								<h1 id="site-banner" align="center">
+					<!-- default -->
+					<a href="index.php">
+					<img src="css/banner v2.5.svg" title="DAT-o-MATIC" />
+					</a>
+				</h1>
+				<nav id="site-nav">
+					<ul>
+																			<li id="nav1-story2" class="nav1-item">
+								<a href="?page=news&s=64">
+																																				News																																			</a>
+							</li>
+													<li id="nav1-story2" class="nav1-item">
+								<a href="?page=search&s=64">
+																																													Search																										</a>
+							</li>
+													<li id="nav1-story2" class="nav1-item">
+								<a href="?page=download&s=64">
+																																																						Download																	</a>
+							</li>
+													<li id="nav1-story2" class="nav1-item">
+								<a href="?page=forum_browse&s=64">
+																																																															Tickets								</a>
+							</li>
+											</ul>
+				</nav>
+			</header>
+			<section id="content-wrap">
+				<aside id="sidebar">
+																																																																																													</aside>
+				<article id="content">
+																						<table class="subtitle-area" width="100%" border="0" cellspacing="0" cellpadding="0">
+							<tr>
+								<td><a href="?page=download&s=64&op=select">Select</a> | <a href="?page=download&s=64&op=dat">Standard DAT</a> | <a href="?page=download&s=64&op=pc_list">P/C List</a> | <a href="?page=download&s=64&op=pc_dat">P/C XML</a> | <a href="?page=download&s=64&op=scene">Scene</a> | Daily | <a href="?page=download&s=64&op=db">DB</a> | <a href="?page=download&s=64&op=dumplog">Dumplog</a></td>
+							</tr>
+						</table>
+																												<div class="standard">
+																<form action="index.php?page=download&op=daily&s=64" name="daily" method="post">
+			<b>Type</b>:
+							<input type="radio" name="dat_type" value="dat" checked="checked" onChange="window.document.forms['daily'].submit();"/> Standard DAT
+										<input type="radio" name="dat_type" value="pc"  onChange="window.document.forms['daily'].submit();"/> P/C
+										<input type="radio" name="dat_type" value="db"  onChange="window.document.forms['daily'].submit();"/> DB
+													<br/><br/>
+				<b>Numbered DATs</b>:
+				<input type="checkbox" name="include_numbered" value="Ok"  onChange="window.document.forms['daily'].submit();"> Include
+						<br /><br />
+			<table width="90%">
+				<tr>
+					<td>
+						<b>Set</b>:
+					</td>
+					<td>
+					</td>
+					<td>
+					</td>
+				</tr>
+				<tr>
+					<td>
+					</td>
+					<td>
+						<i>No-Intro</i>
+					</td>
+					<td>
+						<input type="checkbox" name="set1" value="Ok" checked="checked" onChange="window.document.forms['daily'].submit();"> Main
+						<input type="checkbox" name="set2" value="Ok" checked="checked" onChange="window.document.forms['daily'].submit();"> <i>Source Code</i>
+													<input type="checkbox" name="set8" value="Ok"  onChange="window.document.forms['daily'].submit();"> <i>Aftermarket</i>
+													<input type="checkbox" name="set4" value="Ok" checked="checked" onChange="window.document.forms['daily'].submit();"> <i>Unofficial</i>
+					</td>
+				</tr>
+				<tr>
+					<td>
+					</td>
+					<td>
+						<i>Other</i>
+					</td>
+					<td>
+						<input type="checkbox" name="set3" value="Ok" checked="checked" onChange="window.document.forms['daily'].submit();"> <i>Non-Redump</i>
+													<input type="checkbox" name="set6" value="Ok"  onChange="window.document.forms['daily'].submit();"> <i>Redump Custom</i>
+							<input type="checkbox" name="set7" value="Ok"  onChange="window.document.forms['daily'].submit();"> <i>Redump BIOS</i>
+												<input type="checkbox" name="set5" value="Ok"  onChange="window.document.forms['daily'].submit();"> <i>Non-Game</i>
+					</td>
+				</tr>
+			</table>
+											<br><br><hr><br>
+											        	<input type="submit" name="daily_dl_2025-25" value="Request" />
+									</form>
+			
+														<br /><br />
+					Pack v.<b>2026-02-23 (dat)</b> was generated at 01:06:50 and contains the following datfile(s):
+					<br /><br />
+										<table class="info-table" width="100%" border="0" cellspacing="0" cellpadding="0">
+													<tr class="alternate2">
+								<td >Acorn - Archimedes (20231029-220453)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Acorn - Atom (Tapes) (Bitstream) (20230406-090500)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Acorn - Risc PC (Flux) (20230506-040449)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Acorn RISC OS - Flash Media (Misc) (20221123-054527)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >ACT - Apricot PC Xi (20211125-165629)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Amstrad - CPC (Flux) (20230406-091045)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Amstrad - CPC (Misc) (20230406-091045)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >APF - Imagination Machine (20220416-042756)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >APF - MP-1000 (20240516-120119)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - I (Tapes) (20230313-130448)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - II (A2R) (20251126-152740)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - II (Waveform) (20251126-152740)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - II (WOZ) (20251126-152740)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - II Plus (Flux) (20211227-061630)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - II Plus (WOZ) (20211227-061630)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - IIe (A2R) (20220718-130608)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - IIe (Kryoflux) (20220718-130608)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - IIe (WOZ) (20220718-130608)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - IIGS (A2R) (20220727-120719)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - IIGS (WOZ) (20220727-120719)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - Macintosh (A2R) (20220727-190511)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - Macintosh (DC42) (20220727-190511)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - Macintosh (KryoFlux) (20220727-190511)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - Macintosh (Uncategorized) (20220727-190511)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - Macintosh (WOZ) (20220727-190511)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple - Macintosh (BETA) (Bitstreams) (20220831-024638)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Apple - Macintosh (BETA) (FluxDumps) (20220831-024638)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Apple-Bandai - Pippin (Floppies) (20220623-041333)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Arcade - PC-based (20241207-071923)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Arduboy Inc - Arduboy (20230528-053947)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - 8-bit Family (20260222-023943)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - 8-bit Family (Kryoflux) (20260222-023943)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari 2600 (20260216-104743)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari 5200 (20260213-122147)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari 7800 (A78) (20251221-060908)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari 7800 (BIN) (20251221-060908)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari Jaguar (ABS) (20250208-164242)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari Jaguar (COF) (20250208-164242)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari Jaguar (J64) (20250208-164242)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari Jaguar (JAG) (20250208-164242)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari Jaguar (ROM) (20250208-164242)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari Lynx (BLL) (20251222-090626)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari Lynx (LNX) (20251222-090626)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari Lynx (LYX) (20251222-090626)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Atari - Atari ST (20260222-121844)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Atari - Atari ST (Flux) (20260222-121844)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Bally - Astrocade (20220411-220423)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Bally - Astrocade (Tapes) (20220914-145554)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Bally - Astrocade (Tapes) (WAV) (20220914-145554)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Bandai - Design Master Denshi Mangajuku (20250220-083729)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Bandai - Gundam RX-78 (20211124-013520)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Bandai - WonderSwan (20260124-123054)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Bandai - WonderSwan Color (20251104-101041)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Bandai Little Jammer (BIN) (20250421-130924)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Bandai Little Jammer Pro (BIN) (20250421-130426)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Benesse - Pocket Challenge V2 (20251024-084348)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Benesse - Pocket Challenge W (20241116-140635)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Bit Corporation - Gamate (20230627-112619)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Blaze Entertainment - Evercade (20251020-161035)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Casio - Loopy (BigEndian) (20231004-134719)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Casio - Loopy (LittleEndian) (20231004-134719)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Casio - PV-1000 (20200109-103603)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Coleco - ColecoVision (20250321-153911)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Commodore - Amiga (Bitstream) (20240604-172503)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Commodore - Amiga (20240604-172503)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Commodore - Amiga (Flux) (20240604-172503)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Commodore - Commodore 64 (20250403-112320)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Commodore - Commodore 64 (Headerless) (20250403-112320)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Commodore - Commodore 64 (PP) (20230414-015239)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Commodore - Commodore 64 (Tapes) (20230804-123725)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Commodore - Plus-4 (20090105-000000)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Commodore - VIC-20 (20231226-072946)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Digital Media Cartridge - Firecore (20240212-194543)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Emerson - Arcadia 2001 (20240811-205103)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Entex - Adventure Vision (20081125-031450)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Epoch - Game Pocket Computer (20211122-141248)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Epoch - Super Cassette Vision (20250612-221105)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Fairchild - Channel F (20120223-000000)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Fujitsu - FM Towns (Flux) (20240623-225613)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Fujitsu - FM Towns (HDM) (20240623-225613)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Fujitsu - FM-7 (Bitstream) (20240623-225430)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Fujitsu - FM-7 (Flux) (20240623-225430)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Fujitsu - FM-7 (Sector) (20240623-225430)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Fujitsu - FM-7 (Tapes) (Bitstream) (20230406-075508)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Fujitsu - FM-7 (Tapes) (Waveform) (20230406-075508)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Fujitsu - FMR50 (Flux) (20220302-115306)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Fukutake Publishing - StudyBox (20200113-140743)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Funtech - Super Acan (20240927-111000)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >GamePark - GP2X (20220107-114835)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >GamePark - GP32 (20100224-080928)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >GCE - Vectrex (20251117-141044)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Hartung - Game Master (20211012-064712)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Hitachi - S1 (Waveform) (20250815-035640)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Flux) (20230507-112016)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (IPF) (20230507-112016)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (LooseFilesArchive) (20230507-112016)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (SCP) (20230507-112016)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Digital) (Desura) (20251024-073850)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (Digital) (Groupees) (20220803-071205)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Digital) (JAST USA) (20220607-112544)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (Digital) (Misc) (20251115-143525)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Digital) (Misc) (Hentai) (20251024-075509)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (Digital) (Steam) (Hentai) (20230424-174742)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Digital) (Unknown) (20220709-010657)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >IBM - PC and Compatibles (Digital) (Updates and DLC) (20241221-151011)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >IBM - PC and Compatibles (Flash Media) (20240813-084043)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Interton - VC 4000 (20211122-135810)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >iQue - iQue (CDN) (20220514-122827)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >iQue - iQue (Decrypted) (20220514-122827)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Konami - Picno (20251120-175800)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >LeapFrog - Explorer (20250107-113625)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >LeapFrog - LeapPad (20190401-035314)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >LeapFrog - Leapster Learning Game System (20250122-131709)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Luxor - ABC 800 (Flux) (20220712-142738)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Magnavox - Odyssey 2 (20250723-151315)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Mattel - Intellivision (20260125-144256)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Microsoft - MSX (20260202-122913)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Microsoft - MSX2 (20260124-112728)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Microsoft - Xbox (Development Kit Hard Drives) (20260127-043749)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Microsoft - Xbox 360 (Development Kit Hard Drives) (20230411-073408)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Microsoft - Xbox 360 (Digital) (20260111-235154)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Microsoft - Xbox One (Digital) (CDN) (20240813-033441)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Microsoft - Xbox One (Digital) (ExtractedFiles) (20240813-033441)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Milton-Bradley - Omni (Waveform) (20220725-135116)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Mobile - J2ME (20251208-180029)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Mobile - Palm OS (20240922-194030)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Mobile - Palm OS (Digital) (20230926-163739)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Mobile - Pocket PC (20220725-120454)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Mobile - Pocket PC (Digital) (20221220-122641)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Mobile - Symbian (20220516-232715)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >NEC - PC Engine - TurboGrafx-16 (20260124-120557)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >NEC - PC Engine SuperGrafx (20250913-112105)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >NEC - PC-88 (Flux) (20220725-151518)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >NEC - PC-88 (KryoFlux) (20220725-151518)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >NEC - PC-98 (20231101-162607)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >NEC - PC-98 (Flux) (20231101-162607)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >NEC - PC-98 (Greaseweazle) (20231101-162607)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >NEC - PC-98 (HardDisk) (20231101-162607)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >NEC - PC-98 (Uncategorized) (20231101-162607)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nichibutsu - My Vision (20230724-090438)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nichibutsu - My Vision (Mame) (20230724-090438)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - amiibo (20251202-114031)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Family BASIC (Tapes) (20241007-124902)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Family Computer Disk System (FDS) (20260118-023845)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Family Computer Disk System (QD) (20260118-023845)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Family Computer Network System (20220516-232939)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Game & Watch (20241105-120946)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Game Boy (20260222-003835)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Game Boy Advance (20260209-000508)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Game Boy Advance (e-Reader) (20260209-122907)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Game Boy Advance (Multiboot) (20250330-114147)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Game Boy Advance (Play-Yan) (20250614-094624)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Game Boy Advance (Video) (20251114-101831)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Game Boy Color (20260201-000727)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Kiosk Video Compact Flash (CardImage) (20211208-080217)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Kiosk Video Compact Flash (Extracted) (20211208-080217)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Misc (20260116-154229)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - New Nintendo 3DS (Decrypted) (20251121-060655)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - New Nintendo 3DS (Encrypted) (20251121-060655)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - New Nintendo 3DS (Digital) (Deprecated) (20211118-112910)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 3DS (Decrypted) (20260220-060811)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo 3DS (Encrypted) (20260220-060811)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 3DS (Digital) (CDN) (20251220-224958)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo 3DS (Digital) (Deprecated) (20240623-225059)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 3DS (Digital) (Dev ROMs) (20260222-044610)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo 3DS (Digital) (Pre-Install) (20250422-073339)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 3DS (Digital) (SpotPass) (20250620-172952)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo 64 (BigEndian) (20260222-104933)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 64 (ByteSwapped) (20260222-104933)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo 64 (Mario no Photopi SmartMedia) (20210514-090046)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo 64DD (20260221-121754)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo DS (Decrypted) (20260216-115854)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo DS (Encrypted) (20260216-115854)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo DS (Download Play) (20240712-120512)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo DS (DSvision SD cards) (20221023-022924)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo DSi (Decrypted) (20251108-084929)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo DSi (Encrypted) (20251108-084929)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo DSi (Digital) (20220506-190731)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo DSi (Digital) (CDN) (Decrypted) (20250210-182216)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo DSi (Digital) (CDN) (Encrypted) (20250210-182216)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo Entertainment System (Headered) (20260218-201411)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo Entertainment System (Headerless) (20260218-201411)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Nintendo GameCube (Memory Card) (20250808-204836)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Nintendo GameCube (NPDP Carts) (20251231-024351)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Pokemon Mini (20250407-153358)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Satellaview (20260221-104816)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Sufami Turbo (20240622-035607)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Super Nintendo Entertainment System (20260217-051904)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Virtual Boy (20260130-114942)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Wallpapers (20230410-103428)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Wii (Development Kit Hard Drives) (20250827-140352)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Wii (Digital) (CDN) (20251120-175443)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Wii (Starlight Fun Center) (20251121-174654)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Wii U (Development Kit Hard Drives) (20250424-141246)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Wii U (Digital) (CDN) (20260203-093713)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nintendo - Wii U (Digital) (CDN) (Dev) (20220718-071500)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Nintendo - Wii U (Digital) (CDN) (Lotcheck) (20220718-071500)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Nokia - N-Gage (WIP) (20220220-010530)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Ouya - Ouya (20200720-221834)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Philips - Videopac+ (20250423-131120)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Project EGG (20230831-231500)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >RCA - Studio II (20260201-053357)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sanyo - MBC-550 (Flux) (20220720-120703)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sega - 32X (20260122-193645)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sega - Beena (20240607-160830)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sega - Dreamcast (Development Kit Hard Drives) (20230104-093851)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sega - Dreamcast (Visual Memory Unit) (20230103-091559)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sega - Game Gear (20260124-122308)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sega - Master System - Mark III (20260124-114911)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sega - Mega Drive - Genesis (20260221-141231)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sega - PICO (20250220-080006)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sega - SG-1000 - SC-3000 (20231205-110448)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Seta - Aleck64 (BigEndian) (20220513-040448)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Seta - Aleck64 (ByteSwapped) (20220513-040448)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sharp - MZ-2200 (Waveform) (20220726-061910)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sharp - MZ-700 (Waveform) (20220724-142320)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sharp - X1 (Waveform) (20220720-115216)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sharp - X68000 (Flux) (20220302-045947)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sinclair - ZX Spectrum +3 (20161210-235900)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >SNK - NeoGeo Pocket (20250904-215533)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >SNK - NeoGeo Pocket Color (20240506-123728)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation (PS one Classics) (PSN) (20251228-171141)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation 3 (Development Kit Hard Drives) (Decrypted) (20220831-060008)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation 3 (PSN) (Avatars) (20251221-064935)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation 3 (PSN) (Content) (20251230-064409)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation 3 (PSN) (DLC) (20251207-104612)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation 3 (PSN) (Themes) (20251229-103408)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation 3 (PSN) (Updates) (20251013-105502)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation Mobile (PSN) (20200524-163740)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation Portable (PSN) (Decrypted) (20251223-124222)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation Portable (PSN) (Encrypted) (20251223-124222)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation Portable (PSN) (Minis) (Decrypted) (20251222-175857)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation Portable (PSN) (Minis) (Encrypted) (20251222-175857)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Sony - PlayStation Vita (PSN) (Content) (20260116-223543)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Sony - PlayStation Vita (PSN) (Updates) (20250724-193756)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >TeleNova - Compis (Flux) (20220712-150715)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Texas Instruments - TI-99-4A (A2R) (20221123-054417)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Tiger - Game.com (20221031-184634)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Tiger - Gizmondo (20070531-125518)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Toshiba - Pasopia (BIN) (20220726-115432)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Toshiba - Pasopia (WAV) (20220726-115432)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Toshiba - Visicom (20260201-050255)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >VM Labs - NUON (Digital) (20241204-163311)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >VTech - CreatiVision (20240623-224553)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >VTech - Mobigo (20220207-083241)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >VTech - V.Smile (20260106-005848)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Watara - Supervision (20250625-093232)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Welback - Mega Duck (20240623-225207)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Yamaha - Copera (20211125-171549)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Zeebo - Zeebo (20190815-004208)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Apple - II (20230107-005706)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Apple - IIGS (20211204-095754)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Arcade (20230201-090236)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Atari - 8-bit Family (20230107-012326)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Atari - Atari 2600 (20240806-224451)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - IBM - PC and Compatibles (20251024-075328)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Mobile - Palm OS (20220805-104242)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Nintendo - Game Boy Advance (20230107-011927)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Nintendo - Game Boy Color (20250313-191959)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Nintendo - Nintendo DS (20220204-041058)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Nintendo - Nintendo Entertainment System (20230107-011201)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Nintendo - Nintendo GameCube (20220309-093302)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Nintendo - Super Nintendo Entertainment System (20230107-012046)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Panasonic - 3DO Interactive Multiplayer (20250820-041043)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Panasonic - M2 (20250820-043229)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - Sega - DreamCast (20230107-012643)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Source Code - Various (20250701-121228)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Source Code - VM Labs - NUON (20220609-185850)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Microsoft - Xbox 360 (Title Updates) (20220623-103723)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Nintendo - Nintendo 3DS (Digital) (Updates and DLC) (Decrypted) (20230502-011510)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Nintendo - Nintendo 3DS (Digital) (Updates and DLC) (Encrypted) (20230502-011510)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Nintendo - Wii (Digital) (Deprecated) (WAD) (20251120-175247)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Nintendo - Wii (Digital) (Split DLC) (Deprecated) (WAD) (20190825-031431)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Nintendo - Wii U (Digital) (Deprecated) (20191222-002825)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Obscure Gamers (20250729-051842)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation 3 (BD-Video Extras) (20250405-202040)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation 3 (PSN) (Decrypted) (20180429-070319)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation 4 (PSN) (20230925-001500)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation Portable (PSN) (Decrypted) (20251120-174859)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation Portable (PSX2PSP) (20130318-035538)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation Portable (UMD Music) (20231230-080356)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation Portable (UMD Video) (20251024-151745)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation Vita (BlackFinPSV) (20260117-010911)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation Vita (NoNpDrm) (20260117-010911)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation Vita (PSVgameSD) (20260117-010911)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation Vita (VPK) (20260117-010911)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Sony - PlayStation Vita (PSN) (Decrypted) (NoNpDrm) (20220715-105412)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Sony - PlayStation Vita (PSN) (Decrypted) (VPK) (20220715-105412)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Super Mario Maker Courses (WARC) (20240403-214022)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Video Game Documents (PDF) (20221123-054502)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Video Game Magazine Scans (CBZ) (20220824-051032)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Video Game Magazine Scans (PDF) (20220824-051032)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Video Game Magazine Scans (RAW) (20220824-051032)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Video Game Manual Scans (JPEG) (20221116-105355)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Video Game OSTs (Digital) (RAW) (20241002-175806)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Video Game OSTs (Hardware Recordings) (20250425-053337)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Unofficial - Video Game OSTs (Playbutton) (20221103-212144)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Unofficial - Video Game Scans (RAW) (20230712-063322)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Apple-Bandai - Pippin (20250627-120411)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Atari - Atari Jaguar CD (20221104-083106)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Audio CD (20250702-072942)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - BD-Video (20251127-114922)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Capcom - Play System III (20250421-145612)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Commodore - Amiga CD (20251128-140454)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - DVD-Video (20260114-173235)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - FuRyu & Omron - Purikura (20250422-015128)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Hasbro - iON Educational Gaming System (20230320-151656)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - IBM - PC Compatible (Discs) (20260221-054224)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - IBM - PC Compatible (Discs) (Hentai) (20230818-230002)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Konami - M2 (20251001-063748)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Konami - Python 2 (20250909-091536)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Merit Megatouch (20230411-180804)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Microsoft - Pocket PC (20251020-161845)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Microsoft - Xbox (20251215-001810)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Microsoft - Xbox 360 (20251219-035655)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Namco - Purikura (20250422-015318)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - NEC - PC Engine CD + TurboGrafx CD (20250626-082352)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - NEC - PC-88 (20230330-093338)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Nintendo - Nintendo GameCube (20260102-112040)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Nintendo - Wii (20250621-100715)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Nintendo - Wii U (20250718-114429)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Panasonic - 3DO Interactive Multiplayer (20250115-113934)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Philips - CD-i (20251211-155632)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Playmaji - Polymega (20250902-103359)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Psion - Psion Series (20260203-164631)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sega - ALLS (20260105-015538)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sega - Dreamcast (20250629-084629)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sega - Nu (20260105-024522)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sega - Nu 1.1 (20260105-012423)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sega - Nu 2 (20241008-041705)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sega - Nu SX (20240818-013431)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sega - Sega Mega CD + Sega CD (20250523-072006)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sega - Sega Saturn (20250413-141955)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sega NAOMI Satellite Terminal PC (20240817-233118)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sharp - Zaurus (20250323-061141)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sony - PlayStation (20251225-195142)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sony - PlayStation 2 (20251227-042054)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sony - PlayStation 3 (20250908-072347)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - Sony - PlayStation Portable (20251030-021713)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - Sony Electronic Book (20231206-181917)</td>
+															</tr>
+													<tr class="alternate2">
+								<td >Non-Redump - VM Labs - NUON (20250226-121737)</td>
+															</tr>
+													<tr class="alternate1">
+								<td >Non-Redump - ZAPiT Games - Game Wave Family Entertainment System (20240202-095344)</td>
+															</tr>
+											</table>
+								<br>
+				The next pack will be ready in <b>1 hour(s)</b>: a new pack every 24 hours.
+								</div>
+															</article>
+				<aside id="sidebar">
+																																												<div class="widget">
+								<h1>getting started</h1>
+								<p>
+									<a href="https://wiki.no-intro.org/index.php?title=Main_Page" target="_blank">No-Intro Wiki</a> for information on using and contributing to the database.
+								</p>
+							</div>
+																																		<div class="widget">
+								<h1><del>piracy</del></h1>
+								<p>
+									<b><u>You won't find ROMs and ISOs here</u></b>.
+									<br>Piracy harms consumers as well as legitimate developers, publishers and retailers.
+									<br><b><u>Don't download ROMs and ISOs</u></b>.
+									<br>We do NOT help or encourage users to download or otherwise obtain any of the listed dumps.
+									<br><b><u>We don't upload ROMs and ISOs around</u></b>.
+									<br>We are not in the Console Scene and we are not involved in any P2P sharing.
+								</p>
+							</div>
+																																																						<div class="widget">
+								<h1>SHOUTBOX</h1>
+																																<div align="center">
+									<form action="" method="post">
+										<textarea name="shout_message" value="Message" type="text" cols="22" size="80" class="text" maxlength="255"/>Message</textarea>
+										<br /><input name="shout_nickname" value="Nickname" type="text" size="20" class="text" maxlength="20"/>
+																					<br />10 x 3 = <input name="shout_captcha" value="" type="text" size="5" class="text" maxlength="5"/>
+																				<br />
+										<input type="submit" name="submit_shout_guest" class="submit" value="Submit" />
+									</form>
+								</div>
+																							</div>
+																																		<div class="widget">
+								<h1>Latest tickets</h1>
+																	<p style="overflow-wrap: break-word;">
+										2026-02-23 12:55:45 (MSX)<br />
+										<a href= "?page=forum_browse&s=10&thread=4521">
+											good dump?										</a>
+										<br />
+										Yes, it's redumped by a trusted dumper.
+
+The 32KiB ROM ...
+									</p>
+																	<p style="overflow-wrap: break-word;">
+										2026-02-23 08:09:00 (GB)<br />
+										<a href= "?page=forum_browse&s=46&thread=4522">
+											Shouldn't this be in Game Boy Color?										</a>
+										<br />
+										The cartridge clearly says Game Boy Color in the provided...
+									</p>
+																	<p style="overflow-wrap: break-word;">
+										2026-02-22 23:21:28 (MSX)<br />
+										<a href= "?page=forum_browse&s=10&thread=4521">
+											good dump?										</a>
+										<br />
+										Are you sure MSX release
+
+H.E.R.O. (Japan).rom
+
+is ok...
+									</p>
+																	<p style="overflow-wrap: break-word;">
+										2026-02-22 17:12:46 (FDS)<br />
+										<a href= "?page=forum_browse&s=31&thread=4520">
+											wrong title										</a>
+										<br />
+										It's technically correct right now as Pro Wres. The box l...
+									</p>
+																	<p style="overflow-wrap: break-word;">
+										2026-02-22 09:47:18 (FDS)<br />
+										<a href= "?page=forum_browse&s=31&thread=4520">
+											wrong title										</a>
+										<br />
+										Listed as Pro Wres but should be Pro Wrestling
+									</p>
+																<p align = "center">
+									<a href="index.php?page=forum_browse&s=-99" target="_blank">View all</a>
+								</p>
+								<p align = "center">
+									<a href="index.php?page=forum_log&s=64" target="_blank">Log</a>
+								</p>
+							</div>
+																									</aside>
+			</section>
+						<footer id="site-foot">
+				<section>
+									<ul>
+						<li>
+							This is solely an informational web site. Product names and images used on this website are trademarks of their respective owners, with which we are in no way associated or affiliated. These trademarks of other manufacturers are used solely to identify said products.
+							<br />There are absolutely NO downloads of copyright-protected works, hyperlinks to downloads or similar content on any part of this web site. We make no profit from this activity.
+						</li>
+					</ul>
+					<ul>
+						<li>
+															2026-02-23 22:57:48 (America/Los_Angeles),
+														<a href="index.php?page=crawlers">LOG</a>
+																																				</li>
+						<li>
+							<a href="https://datomatic.no-intro.org/stuff/terms.txt" target="_blank">Terms</a> - <a href="https://datomatic.no-intro.org/stuff/privacy-policy.txt" target="_blank">Privacy policy</a>
+																				</li>
+					</ul>
+								</section>
+			</footer>
+		</div>
+			</body>
+</html>

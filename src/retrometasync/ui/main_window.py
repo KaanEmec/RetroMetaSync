@@ -19,7 +19,7 @@ from retrometasync.core.conversion.system_mapping_store import (
 from retrometasync.core import LibraryDetector, LibraryNormalizer
 from retrometasync.core.asset_verifier import verify_unchecked_assets
 from retrometasync.core.dat_auto_detector import DatAutoDetector, DatDetectionMatch
-from retrometasync.core.detection import DetectionResult
+from retrometasync.core.detection import DetectionCancelled, DetectionResult
 from retrometasync.core.models import Game, Library
 from retrometasync.core.normalizer import NormalizationResult
 from retrometasync.core.preloaded_metadata import enrich_library_systems_with_preloaded_metadata
@@ -29,6 +29,10 @@ from retrometasync.ui.game_list import GameListPane
 from retrometasync.ui.library_view import LibraryView
 from retrometasync.ui.progress_log import ProgressLog
 from retrometasync.ui.system_mapping_dialog import show_system_mapping_dialog
+
+
+class _AnalysisCancelledError(Exception):
+    """Internal signal used to abort analysis cooperatively."""
 
 
 class MainWindow(ctk.CTk):
@@ -51,6 +55,8 @@ class MainWindow(ctk.CTk):
         self.result_queue: Queue[tuple[str, object]] = Queue()
         self.current_library: Library | None = None
         self._analysis_running = False
+        self._analysis_cancel_requested = False
+        self._analysis_cancel_event = threading.Event()
         self._conversion_running = False
         self._asset_check_running = False
         self._dat_detection_running = False
@@ -115,6 +121,15 @@ class MainWindow(ctk.CTk):
         self.analyze_button = ctk.CTkButton(source_frame, text="🔍 Analyze Library", command=self._on_analyze)
         self.analyze_button.grid(row=0, column=3, padx=(0, 10), pady=10)
 
+        self.stop_analyze_button = ctk.CTkButton(
+            source_frame,
+            text="⏹ Stop",
+            width=90,
+            command=self._on_stop_analysis,
+            state="disabled",
+        )
+        self.stop_analyze_button.grid(row=0, column=4, padx=(0, 6), pady=10)
+
         self.source_mode_var = ctk.StringVar(value="Auto (Meta)")
         self.source_mode_menu = ctk.CTkOptionMenu(
             source_frame,
@@ -128,7 +143,7 @@ class MainWindow(ctk.CTk):
             variable=self.source_mode_var,
             width=170,
         )
-        self.source_mode_menu.grid(row=0, column=4, padx=(0, 10), pady=10, sticky="e")
+        self.source_mode_menu.grid(row=0, column=5, padx=(0, 10), pady=10, sticky="e")
 
         self.preloaded_metadata_root_entry = ctk.CTkEntry(
             source_frame,
@@ -158,7 +173,7 @@ class MainWindow(ctk.CTk):
 
         self.force_dat_file_button = ctk.CTkButton(
             source_frame,
-            text="📄 Use DAT File",
+            text="📄 Force DAT File",
             width=110,
             command=self._on_force_dat_file,
         )
@@ -405,15 +420,25 @@ class MainWindow(ctk.CTk):
         with self._progress_lock:
             self._last_progress_emit["analysis"] = 0.0
         self.progress_log.log(f"Analyzing: {source_path}")
-        self._set_status("Running detection and metadata normalization...")
+        scan_mode = self._scan_mode_from_ui(self.source_mode_var.get())
+        if scan_mode == "meta":
+            self._set_status(
+                "Running metadata-only analysis (no full ROM/asset checks). Selected items are validated during conversion."
+            )
+            self.progress_log.log(
+                "[stage] Auto (Meta): metadata-only analyze enabled; ROM/asset existence checks are deferred to conversion."
+            )
+        else:
+            self._set_status("Running detection and metadata normalization...")
+        self._analysis_cancel_requested = False
+        self._analysis_cancel_event.clear()
+        self._analysis_running = True
         self._set_global_busy(True)
         self.convert_pane.set_enabled(False)
-        self._analysis_running = True
         self.current_library = None
         self.library_view.reset()
         self.game_list.reset()
         self.game_list.set_enabled(False)
-        scan_mode = self._scan_mode_from_ui(self.source_mode_var.get())
         metadata_root = self._preloaded_metadata_root_from_ui()
         use_hash_fallback = bool(self.preloaded_hashes_var.get())
 
@@ -424,6 +449,27 @@ class MainWindow(ctk.CTk):
         )
         worker.start()
 
+    def _on_stop_analysis(self) -> None:
+        if not self._analysis_running or self._analysis_cancel_requested:
+            return
+        self._analysis_cancel_requested = True
+        self._analysis_cancel_event.set()
+        self.progress_log.log("[stage] Stop requested. Finishing current scan step...")
+        self._set_status("Stopping analysis...")
+        self._update_analysis_stop_button_state()
+
+    def _is_analysis_cancel_requested(self) -> bool:
+        return self._analysis_cancel_event.is_set()
+
+    def _update_analysis_stop_button_state(self) -> None:
+        if self._analysis_running and not self._analysis_cancel_requested:
+            self.stop_analyze_button.configure(state="normal", text="⏹ Stop")
+            return
+        if self._analysis_running and self._analysis_cancel_requested:
+            self.stop_analyze_button.configure(state="disabled", text="⏳ Stopping...")
+            return
+        self.stop_analyze_button.configure(state="disabled", text="⏹ Stop")
+
     def _analyze_worker(
         self,
         source_path: Path,
@@ -431,24 +477,34 @@ class MainWindow(ctk.CTk):
         preloaded_metadata_root: Path | None,
         compute_missing_hashes: bool,
     ) -> None:
+        def analysis_progress(message: str) -> None:
+            if self._is_analysis_cancel_requested():
+                raise _AnalysisCancelledError("Analysis cancelled by user.")
+            self._enqueue_progress("analysis", "analysis_progress", message)
+
         try:
-            self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:start")
+            analysis_progress("[stage] detect:start")
             detection_result = self.detector.detect(
                 source_path,
-                progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
+                progress_callback=analysis_progress,
                 scan_mode=scan_mode,
+                cancel_requested=self._is_analysis_cancel_requested,
             )
-            self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:done")
-            self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:start")
+            analysis_progress("[stage] detect:done")
+            analysis_progress("[stage] normalize:start")
             normalization_result = self.normalizer.normalize(
                 detection_result,
-                progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
+                progress_callback=analysis_progress,
                 scan_mode=scan_mode,
                 preloaded_metadata_root=preloaded_metadata_root,
                 compute_missing_hashes=compute_missing_hashes,
             )
-            self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:done")
+            analysis_progress("[stage] normalize:done")
+            if self._is_analysis_cancel_requested():
+                raise _AnalysisCancelledError("Analysis cancelled by user.")
             self.result_queue.put(("analysis_complete", (detection_result, normalization_result)))
+        except (_AnalysisCancelledError, DetectionCancelled):
+            self.result_queue.put(("analysis_cancelled", "Analysis cancelled by user."))
         except Exception as exc:  # noqa: BLE001
             self.result_queue.put(("analysis_error", str(exc)))
 
@@ -462,6 +518,8 @@ class MainWindow(ctk.CTk):
                     self._on_analysis_complete(detection_result, normalization_result)
                 elif event_type == "analysis_error":
                     self._on_analysis_error(str(payload))
+                elif event_type == "analysis_cancelled":
+                    self._on_analysis_cancelled(str(payload))
                 elif event_type == "analysis_progress":
                     self.progress_log.log(str(payload))
                 elif event_type == "conversion_progress":
@@ -490,6 +548,9 @@ class MainWindow(ctk.CTk):
     def _on_analysis_complete(
         self, detection_result: DetectionResult, normalization_result: NormalizationResult
     ) -> None:
+        if self._analysis_cancel_requested:
+            self._on_analysis_cancelled("Analysis cancelled by user.")
+            return
         library = normalization_result.library
         self.current_library = library
         self.library_view.set_library(library)
@@ -514,19 +575,33 @@ class MainWindow(ctk.CTk):
         self._set_status(
             f"Analysis complete. Ecosystem: {library.detected_ecosystem} | Systems: {len(library.systems)}"
         )
+        self._analysis_running = False
+        self._analysis_cancel_requested = False
+        self._analysis_cancel_event.clear()
         self._set_global_busy(False)
         has_games = any(library.games_by_system.values())
         self.convert_pane.set_enabled(has_games)
         self.game_list.set_enabled(True)
-        self._analysis_running = False
 
     def _on_analysis_error(self, message: str) -> None:
         self.progress_log.log(f"[error] {message}")
         self._set_status(f"Analysis failed: {message}", is_error=True)
+        self._analysis_running = False
+        self._analysis_cancel_requested = False
+        self._analysis_cancel_event.clear()
         self._set_global_busy(False)
         self.convert_pane.set_enabled(False)
         self.game_list.set_enabled(True)
+
+    def _on_analysis_cancelled(self, message: str) -> None:
+        self.progress_log.log(f"[stage] {message}")
+        self._set_status("Analysis stopped.")
         self._analysis_running = False
+        self._analysis_cancel_requested = False
+        self._analysis_cancel_event.clear()
+        self._set_global_busy(False)
+        self.convert_pane.set_enabled(False)
+        self.game_list.set_enabled(True)
 
     def _set_status(self, message: str, is_error: bool = False) -> None:
         self.status_label.configure(
@@ -833,6 +908,7 @@ class MainWindow(ctk.CTk):
         self.force_dat_file_button.configure(state=state)
         self.strict_dat_verify_check.configure(state=state)
         self.preloaded_hashes_check.configure(state=state)
+        self._update_analysis_stop_button_state()
 
     def _enqueue_progress(self, channel: str, event_type: str, message: str) -> None:
         now = time.monotonic()

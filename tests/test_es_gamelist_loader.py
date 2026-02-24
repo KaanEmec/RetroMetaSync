@@ -8,7 +8,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from retrometasync.core.loaders import ESGamelistLoader, LoaderInput
-from retrometasync.core.models import MetadataSource, System
+from retrometasync.core.models import AssetType, MetadataSource, System
 
 
 class ESGamelistLoaderTests(unittest.TestCase):
@@ -163,6 +163,34 @@ class ESGamelistLoaderTests(unittest.TestCase):
             result = ESGamelistLoader().load(LoaderInput(source_root=root, systems=[system], scan_mode="quick"))
             self.assertEqual(len(result.games_by_system["snes"]), 1)
             self.assertEqual(result.games_by_system["snes"][0].title, "In Metadata")
+
+    def test_discovers_extended_suffix_assets_and_infers_types(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            snes_dir = root / "roms" / "snes"
+            images_dir = snes_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+
+            rom_path = snes_dir / "Chrono Trigger.sfc"
+            rom_path.write_bytes(b"rom")
+            (images_dir / "Chrono Trigger-fanart.png").write_bytes(b"fan")
+            (images_dir / "Chrono Trigger-screenshot.png").write_bytes(b"shot")
+            (images_dir / "Chrono Trigger-titleshot.png").write_bytes(b"title")
+
+            system = System(
+                system_id="snes",
+                display_name="SNES",
+                rom_root=snes_dir,
+                metadata_source=MetadataSource.NONE,
+                metadata_paths=[],
+            )
+
+            result = ESGamelistLoader().load(LoaderInput(source_root=root, systems=[system]))
+            game = result.games_by_system["snes"][0]
+            asset_types = {asset.asset_type for asset in game.assets}
+            self.assertIn(AssetType.FANART, asset_types)
+            self.assertIn(AssetType.SCREENSHOT_GAMEPLAY, asset_types)
+            self.assertIn(AssetType.SCREENSHOT_TITLE, asset_types)
 
 
 if __name__ == "__main__":

@@ -355,6 +355,57 @@ class ConversionEngineTests(unittest.TestCase):
             self.assertTrue(converted_image.exists())
             self.assertGreaterEqual(result.assets_copied, 1)
 
+    def test_batocera_preserves_extra_media_suffix_files_in_images_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_root = root / "source"
+            output_root = root / "output"
+            source_root.mkdir(parents=True, exist_ok=True)
+
+            rom_path = source_root / "Sonic The Hedgehog.md"
+            rom_path.write_bytes(b"rom")
+            image_path = source_root / "Sonic The Hedgehog-image.png"
+            image_path.write_bytes(b"image")
+            thumb_path = source_root / "Sonic The Hedgehog-thumb.png"
+            thumb_path.write_bytes(b"thumb")
+            fanart_path = source_root / "Sonic The Hedgehog-fanart.png"
+            fanart_path.write_bytes(b"fanart")
+            titleshot_path = source_root / "Sonic The Hedgehog-titleshot.png"
+            titleshot_path.write_bytes(b"title")
+
+            system = System(
+                system_id="megadrive",
+                display_name="Mega Drive",
+                rom_root=source_root,
+                metadata_source=MetadataSource.GAMELIST_XML,
+            )
+            game = Game(
+                rom_path=rom_path,
+                system_id="megadrive",
+                title="Sonic The Hedgehog",
+                assets=[
+                    Asset(asset_type=AssetType.BOX_FRONT, file_path=image_path),
+                    Asset(asset_type=AssetType.SCREENSHOT_GAMEPLAY, file_path=thumb_path),
+                    Asset(asset_type=AssetType.FANART, file_path=fanart_path),
+                    Asset(asset_type=AssetType.SCREENSHOT_TITLE, file_path=titleshot_path),
+                ],
+            )
+            library = Library(source_root=source_root, systems={"megadrive": system}, games_by_system={"megadrive": [game]})
+            request = ConversionRequest(
+                library=library,
+                selected_games={"megadrive": [game]},
+                target_ecosystem="batocera",
+                output_root=output_root,
+            )
+
+            result = ConversionEngine().convert(request)
+            images_root = output_root / "roms" / "megadrive" / "images"
+            self.assertTrue((images_root / "Sonic The Hedgehog-image.png").exists())
+            self.assertTrue((images_root / "Sonic The Hedgehog-thumb.png").exists())
+            self.assertTrue((images_root / "Sonic The Hedgehog-fanart.png").exists())
+            self.assertTrue((images_root / "Sonic The Hedgehog-titleshot.png").exists())
+            self.assertGreaterEqual(result.assets_copied, 4)
+
     def test_es_family_fallback_uses_neighbor_images_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

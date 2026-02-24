@@ -15,6 +15,7 @@ class LoaderInput:
     source_root: Path
     systems: list[System] = field(default_factory=list)
     progress_callback: ProgressCallback | None = None
+    # Supported modes: "meta", "deep", "force".
     scan_mode: str = "deep"
     max_asset_index_files: int = 40000
 

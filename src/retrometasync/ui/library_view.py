@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+from typing import Callable
 
 import customtkinter as ctk
 
@@ -12,8 +13,10 @@ from retrometasync.ui.table_perf import (
     BASE_TABLE_ROW_HEIGHT,
     MAX_TABLE_FONT_SIZE,
     MAX_TABLE_ROW_HEIGHT,
+    MIN_TABLE_HEADER_FONT_SIZE,
     MIN_TABLE_FONT_SIZE,
     MIN_TABLE_ROW_HEIGHT,
+    TABLE_HEADER_FONT_RATIO,
     get_dpi_scale,
 )
 
@@ -43,6 +46,7 @@ def _apply_dark_treeview_style(
     if scale is None:
         scale = get_dpi_scale(widget)
     font_size = max(MIN_TABLE_FONT_SIZE, min(MAX_TABLE_FONT_SIZE, round(BASE_TABLE_FONT_SIZE * scale)))
+    heading_font_size = max(MIN_TABLE_HEADER_FONT_SIZE, round(font_size * TABLE_HEADER_FONT_RATIO))
     row_height = max(MIN_TABLE_ROW_HEIGHT, min(MAX_TABLE_ROW_HEIGHT, round(BASE_TABLE_ROW_HEIGHT * scale)))
     style = ttk.Style(widget)
     style.theme_use("clam")
@@ -59,7 +63,7 @@ def _apply_dark_treeview_style(
         "Library.Treeview.Heading",
         background="#334155",
         foreground="#f1f5f9",
-        font=("Segoe UI", font_size, "bold"),
+        font=("Segoe UI", heading_font_size, "bold"),
     )
     style.map(
         "Library.Treeview",
@@ -105,15 +109,16 @@ class LibraryView(ctk.CTkFrame):
         self._table_container.grid_columnconfigure(0, weight=1)
         self._table_container.grid_rowconfigure(0, weight=1)
         self._last_tree_rows: int | None = None
-        self._rows_cache: list[tuple[str, int, int, int, int]] = []
+        self._rows_cache: list[tuple[str, str, int, int, int, int]] = []
         self._sort_column: str = "system"
         self._sort_desc: bool = False
+        self._on_system_selected: Callable[[str], None] | None = None
 
         self._tree = ttk.Treeview(
             self._table_container,
             columns=("system", "roms", "images", "videos", "manuals"),
             show="headings",
-            selectmode="none",
+            selectmode="browse",
             height=20,
             style="Library.Treeview",
         )
@@ -135,8 +140,12 @@ class LibraryView(ctk.CTkFrame):
         self._tree.configure(yscrollcommand=scrollbar.set)
         self._tree.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
+        self._tree.bind("<Double-1>", self._on_row_activate)
         self._table_container.bind("<Configure>", self._on_table_configure)
         self.after_idle(self._update_tree_height)
+
+    def set_on_system_selected(self, callback: Callable[[str], None]) -> None:
+        self._on_system_selected = callback
 
     def _on_table_configure(self, event) -> None:
         if event.height <= 0 or not hasattr(self, "_tree_row_height"):
@@ -185,7 +194,7 @@ class LibraryView(ctk.CTkFrame):
                 video_count += int(has_video)
                 manual_count += int(has_manual)
 
-            self._rows_cache.append((system.display_name, rom_count, image_count, video_count, manual_count))
+            self._rows_cache.append((system.system_id, system.display_name, rom_count, image_count, video_count, manual_count))
         self._render_rows()
         self._update_tree_height()
 
@@ -200,7 +209,7 @@ class LibraryView(ctk.CTkFrame):
             self._tree.delete(iid)
 
         rows = list(self._rows_cache)
-        col_idx = {"system": 0, "roms": 1, "images": 2, "videos": 3, "manuals": 4}[self._sort_column]
+        col_idx = {"system": 1, "roms": 2, "images": 3, "videos": 4, "manuals": 5}[self._sort_column]
         if self._sort_column == "system":
             rows.sort(key=lambda r: str(r[col_idx]).lower(), reverse=self._sort_desc)
         else:
@@ -210,11 +219,22 @@ class LibraryView(ctk.CTkFrame):
             iid = self._tree.insert(
                 "",
                 tk.END,
-                values=(row[0], str(row[1]), str(row[2]), str(row[3]), str(row[4])),
+                iid=row[0],
+                values=(row[1], str(row[2]), str(row[3]), str(row[4]), str(row[5])),
             )
             if idx % 2 == 1:
                 self._tree.item(iid, tags=("alternate",))
         self._refresh_heading_labels()
+
+    def _on_row_activate(self, event) -> None:
+        if self._on_system_selected is None:
+            return
+        region = self._tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+        iid = self._tree.identify_row(event.y)
+        if iid:
+            self._on_system_selected(iid)
 
     def _on_heading_click(self, column: str) -> None:
         if self._sort_column == column:
