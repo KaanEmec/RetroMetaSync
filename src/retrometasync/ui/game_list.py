@@ -443,6 +443,14 @@ class GameListPane(ctk.CTkFrame):
     def set_on_check_unchecked_visible(self, callback: Callable[[], None]) -> None:
         self._on_check_unchecked_visible = callback
 
+    def set_system_filter(self, system_id: str) -> None:
+        options = list(self.system_filter.cget("values"))
+        if system_id not in options:
+            self.system_filter_var.set("All Systems")
+        else:
+            self.system_filter_var.set(system_id)
+        self._schedule_filter_refresh()
+
     def visible_unchecked_game_keys(self) -> list[str]:
         if not self._view_model:
             return []
@@ -459,6 +467,16 @@ class GameListPane(ctk.CTkFrame):
             return []
         gbk = self._view_model.games_by_key()
         return [(key, gbk[key]) for key in self.visible_unchecked_game_keys() if key in gbk]
+
+    def visible_system_ids(self) -> list[str]:
+        return sorted({key.split("::", 1)[0] for key in self._visible_keys if "::" in key})
+
+    def has_active_filters(self) -> bool:
+        return (
+            self.system_filter_var.get() != "All Systems"
+            or self.asset_filter_var.get() != "Any Assets"
+            or bool(self.search_filter_var.get().strip())
+        )
 
     def refresh_asset_states_for_keys(self, keys: list[str]) -> None:
         if not self._view_model or not keys:

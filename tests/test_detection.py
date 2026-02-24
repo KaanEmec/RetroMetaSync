@@ -53,7 +53,7 @@ class DetectionTests(unittest.TestCase):
             result = LibraryDetector().detect(root)
             self.assertEqual(result.detected_ecosystem, "launchbox")
             self.assertEqual(result.source_root, root / "LaunchBox")
-            self.assertTrue(any(system.system_id == "sega_genesis" for system in result.systems))
+            self.assertTrue(any(system.system_id == "genesis" for system in result.systems))
 
     def test_launchbox_mode_accepts_data_folder_directly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -65,7 +65,7 @@ class DetectionTests(unittest.TestCase):
             result = LibraryDetector().detect(data_root, preferred_ecosystem="launchbox")
             self.assertEqual(result.detected_ecosystem, "launchbox")
             self.assertEqual(result.source_root, launchbox_root)
-            self.assertTrue(any(system.system_id == "nintendo_64" for system in result.systems))
+            self.assertTrue(any(system.system_id == "n64" for system in result.systems))
 
     def test_preferred_retroarch_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
+from retrometasync.config.system_aliases import canonicalize_system_id
 from retrometasync.core.loaders.base import BaseLoader, LoaderInput, LoaderResult
 from retrometasync.core.models import Asset, AssetType, AssetVerificationState, Game, MetadataSource, System
 
@@ -244,5 +245,5 @@ class LaunchBoxXmlLoader(BaseLoader):
 
     @staticmethod
     def _to_system_id(display_name: str) -> str:
-        return display_name.strip().lower().replace(" ", "_")
+        return canonicalize_system_id(display_name)
 

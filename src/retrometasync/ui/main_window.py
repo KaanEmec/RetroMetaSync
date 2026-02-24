@@ -18,9 +18,11 @@ from retrometasync.core.conversion.system_mapping_store import (
 )
 from retrometasync.core import LibraryDetector, LibraryNormalizer
 from retrometasync.core.asset_verifier import verify_unchecked_assets
+from retrometasync.core.dat_auto_detector import DatAutoDetector, DatDetectionMatch
 from retrometasync.core.detection import DetectionResult
 from retrometasync.core.models import Game, Library
 from retrometasync.core.normalizer import NormalizationResult
+from retrometasync.core.preloaded_metadata import enrich_library_systems_with_preloaded_metadata
 from retrometasync.ui.convert_dialog import ConvertPane
 from retrometasync.ui.duplicate_conflict_dialog import show_duplicate_conflict_dialog
 from retrometasync.ui.game_list import GameListPane
@@ -44,12 +46,14 @@ class MainWindow(ctk.CTk):
 
         self.detector = LibraryDetector()
         self.normalizer = LibraryNormalizer()
+        self.dat_auto_detector = DatAutoDetector()
         self.converter = ConversionEngine()
         self.result_queue: Queue[tuple[str, object]] = Queue()
         self.current_library: Library | None = None
         self._analysis_running = False
         self._conversion_running = False
         self._asset_check_running = False
+        self._dat_detection_running = False
         self._progress_lock = threading.Lock()
         self._last_progress_emit: dict[str, float] = {"analysis": 0.0, "conversion": 0.0, "verify_assets": 0.0}
         self._progress_emit_interval_sec = 0.15
@@ -73,6 +77,7 @@ class MainWindow(ctk.CTk):
 
         self.library_view = LibraryView(self.top_frame)
         self.library_view.grid(row=0, column=0, padx=(0, 6), pady=0, sticky="nsew")
+        self.library_view.set_on_system_selected(self._on_library_system_selected)
 
         self.game_list = GameListPane(self.top_frame)
         self.game_list.grid(row=0, column=1, padx=(6, 0), pady=0, sticky="nsew")
@@ -110,25 +115,70 @@ class MainWindow(ctk.CTk):
         self.analyze_button = ctk.CTkButton(source_frame, text="🔍 Analyze Library", command=self._on_analyze)
         self.analyze_button.grid(row=0, column=3, padx=(0, 10), pady=10)
 
-        self.source_mode_var = ctk.StringVar(value="Auto Detect")
+        self.source_mode_var = ctk.StringVar(value="Auto (Meta)")
         self.source_mode_menu = ctk.CTkOptionMenu(
             source_frame,
             values=[
-                "Auto Detect",
-                "LaunchBox (Root/Data)",
-                "ES Family (gamelist)",
-                "ES-DE",
-                "RetroBat",
-                "RetroArch/Playlist",
-                "AttractMode",
-                "Pegasus",
-                "OnionOS",
-                "muOS",
+                "Auto (Meta)",
+                "Auto (Scan)",
+                "Auto (Force Scan)",
+                "Launchbox Root/Data",
+                "Single Rom Folder",
             ],
             variable=self.source_mode_var,
             width=170,
         )
         self.source_mode_menu.grid(row=0, column=4, padx=(0, 10), pady=10, sticky="e")
+
+        self.preloaded_metadata_root_entry = ctk.CTkEntry(
+            source_frame,
+            placeholder_text="Optional: preloaded DAT folder",
+            width=250,
+        )
+        self.preloaded_metadata_root_entry.grid(row=1, column=1, padx=(0, 6), pady=(0, 10), sticky="ew")
+        default_preloaded_root = self._default_preloaded_metadata_root()
+        if default_preloaded_root is not None:
+            self.preloaded_metadata_root_entry.insert(0, str(default_preloaded_root))
+
+        self.preloaded_metadata_root_browse = ctk.CTkButton(
+            source_frame,
+            text="📁 DATs",
+            width=90,
+            command=self._on_browse_preloaded_metadata_root,
+        )
+        self.preloaded_metadata_root_browse.grid(row=1, column=2, padx=(0, 6), pady=(0, 10))
+
+        self.detect_dat_button = ctk.CTkButton(
+            source_frame,
+            text="🧠 Detect DATs",
+            width=120,
+            command=self._on_detect_dats,
+        )
+        self.detect_dat_button.grid(row=1, column=3, padx=(0, 6), pady=(0, 10), sticky="w")
+
+        self.force_dat_file_button = ctk.CTkButton(
+            source_frame,
+            text="📄 Use DAT File",
+            width=110,
+            command=self._on_force_dat_file,
+        )
+        self.force_dat_file_button.grid(row=1, column=4, padx=(0, 6), pady=(0, 10), sticky="w")
+
+        self.strict_dat_verify_var = ctk.BooleanVar(value=False)
+        self.strict_dat_verify_check = ctk.CTkCheckBox(
+            source_frame,
+            text="Strict DAT verify (slower)",
+            variable=self.strict_dat_verify_var,
+        )
+        self.strict_dat_verify_check.grid(row=1, column=5, padx=(0, 10), pady=(0, 10), sticky="w")
+
+        self.preloaded_hashes_var = ctk.BooleanVar(value=False)
+        self.preloaded_hashes_check = ctk.CTkCheckBox(
+            source_frame,
+            text="Use checksum fallback matching (slower)",
+            variable=self.preloaded_hashes_var,
+        )
+        self.preloaded_hashes_check.grid(row=2, column=1, columnspan=5, padx=(0, 10), pady=(0, 10), sticky="w")
 
         self.status_label = ctk.CTkLabel(
             self,
@@ -144,6 +194,197 @@ class MainWindow(ctk.CTk):
         if selected:
             self.source_entry.delete(0, "end")
             self.source_entry.insert(0, selected)
+
+    def _on_browse_preloaded_metadata_root(self) -> None:
+        initial = self.preloaded_metadata_root_entry.get().strip() or self.source_entry.get().strip() or str(Path.home())
+        selected = filedialog.askdirectory(initialdir=initial)
+        if selected:
+            self.preloaded_metadata_root_entry.delete(0, "end")
+            self.preloaded_metadata_root_entry.insert(0, selected)
+
+    def _default_preloaded_metadata_root(self) -> Path | None:
+        project_root = Path(__file__).resolve().parents[3]
+        candidate = project_root / "PreloadedMetaData"
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+        return None
+
+    def _dat_detection_target_systems(self) -> list[str]:
+        library = self.current_library
+        if library is None:
+            return []
+        if self.game_list.has_active_filters():
+            return self.game_list.visible_system_ids()
+        return sorted(library.systems.keys())
+
+    def _on_detect_dats(self) -> None:
+        if self._analysis_running or self._conversion_running or self._asset_check_running or self._dat_detection_running:
+            return
+        if self.current_library is None:
+            self._set_status("Analyze a library before detecting DAT files.", is_error=True)
+            return
+
+        target_system_ids = self._dat_detection_target_systems()
+        if not target_system_ids:
+            self._set_status("No visible systems to detect DAT files for.", is_error=True)
+            return
+        scope_label = "visible systems" if self.game_list.has_active_filters() else "all scanned systems"
+        self._dat_detection_running = True
+        self._set_global_busy(True)
+        self.convert_pane.set_enabled(False)
+        self.game_list.set_enabled(False)
+        self.progress_log.log(f"Detecting DAT files for {len(target_system_ids)} {scope_label}...")
+        self._set_status(f"Detecting DAT files for {len(target_system_ids)} systems...")
+
+        source_root = self.current_library.source_root
+        metadata_root = self._preloaded_metadata_root_from_ui()
+        strict_verify = bool(self.strict_dat_verify_var.get())
+        hash_fallback = bool(self.preloaded_hashes_var.get())
+
+        worker = threading.Thread(
+            target=self._detect_dats_worker,
+            args=(target_system_ids, source_root, metadata_root, strict_verify, hash_fallback, "Auto Detect DATs"),
+            daemon=True,
+        )
+        worker.start()
+
+    def _detect_dats_worker(
+        self,
+        target_system_ids: list[str],
+        source_root: Path,
+        metadata_root: Path | None,
+        strict_verify: bool,
+        hash_fallback: bool,
+        action_label: str,
+    ) -> None:
+        library = self.current_library
+        if library is None:
+            self.result_queue.put(("detect_dat_error", "No analyzed library loaded."))
+            return
+        try:
+            detection = self.dat_auto_detector.detect_for_systems(
+                source_root=source_root,
+                metadata_root=metadata_root,
+                target_system_ids=target_system_ids,
+                strict_verify=strict_verify,
+                games_by_system=library.games_by_system,
+                progress_callback=lambda line: self._enqueue_progress("analysis", "detect_dat_progress", line),
+            )
+            overrides = {system_id: match.dat_path for system_id, match in detection.matches.items()}
+            metadata_result = enrich_library_systems_with_preloaded_metadata(
+                library=library,
+                source_root=source_root,
+                metadata_root=metadata_root,
+                target_system_ids=target_system_ids,
+                compute_missing_hashes=hash_fallback,
+                progress_callback=lambda line: self._enqueue_progress("analysis", "detect_dat_progress", line),
+                dat_override_by_system=overrides,
+            )
+            self.result_queue.put(
+                (
+                    "detect_dat_complete",
+                    {
+                        "target_count": len(target_system_ids),
+                        "matches": detection.matches,
+                        "unresolved": detection.unresolved_systems,
+                        "warnings": detection.warnings + (metadata_result.warnings or []),
+                        "enriched_games": metadata_result.enriched_games,
+                        "action_label": action_label,
+                    },
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.result_queue.put(("detect_dat_error", str(exc)))
+
+    def _on_force_dat_file(self) -> None:
+        if self._analysis_running or self._conversion_running or self._asset_check_running or self._dat_detection_running:
+            return
+        if self.current_library is None:
+            self._set_status("Analyze a library before forcing DAT selection.", is_error=True)
+            return
+        target_system_ids = self._dat_detection_target_systems()
+        if not target_system_ids:
+            self._set_status("No visible systems to apply DAT file.", is_error=True)
+            return
+        initial = self.preloaded_metadata_root_entry.get().strip() or str(self.current_library.source_root)
+        selected_file = filedialog.askopenfilename(
+            initialdir=initial,
+            filetypes=[("DAT/XML files", "*.dat *.xml"), ("All files", "*.*")],
+        )
+        if not selected_file:
+            return
+        dat_file = Path(selected_file)
+        if not dat_file.exists() or not dat_file.is_file():
+            self._set_status("Selected DAT file is invalid.", is_error=True)
+            return
+        self._run_dat_action(
+            target_system_ids=target_system_ids,
+            action_label="Force DAT File",
+            worker_target=self._force_dat_file_worker,
+            worker_args=(
+                target_system_ids,
+                self.current_library.source_root,
+                dat_file,
+                bool(self.preloaded_hashes_var.get()),
+            ),
+        )
+
+    def _run_dat_action(self, *, target_system_ids: list[str], action_label: str, worker_target, worker_args: tuple) -> None:
+        scope_label = "visible systems" if self.game_list.has_active_filters() else "all scanned systems"
+        self._dat_detection_running = True
+        self._set_global_busy(True)
+        self.convert_pane.set_enabled(False)
+        self.game_list.set_enabled(False)
+        self.progress_log.log(f"{action_label}: {len(target_system_ids)} {scope_label}...")
+        self._set_status(f"{action_label} running for {len(target_system_ids)} systems...")
+        worker = threading.Thread(target=worker_target, args=worker_args, daemon=True)
+        worker.start()
+
+    def _force_dat_file_worker(
+        self,
+        target_system_ids: list[str],
+        source_root: Path,
+        dat_file: Path,
+        hash_fallback: bool,
+    ) -> None:
+        library = self.current_library
+        if library is None:
+            self.result_queue.put(("detect_dat_error", "No analyzed library loaded."))
+            return
+        try:
+            matches = {
+                system_id: DatDetectionMatch(
+                    system_id=system_id,
+                    dat_path=dat_file,
+                    confidence=100,
+                    reason="manual-file",
+                )
+                for system_id in target_system_ids
+            }
+            metadata_result = enrich_library_systems_with_preloaded_metadata(
+                library=library,
+                source_root=source_root,
+                metadata_root=dat_file.parent,
+                target_system_ids=target_system_ids,
+                compute_missing_hashes=hash_fallback,
+                progress_callback=lambda line: self._enqueue_progress("analysis", "detect_dat_progress", line),
+                dat_override_by_system={system_id: dat_file for system_id in target_system_ids},
+            )
+            self.result_queue.put(
+                (
+                    "detect_dat_complete",
+                    {
+                        "target_count": len(target_system_ids),
+                        "matches": matches,
+                        "unresolved": [],
+                        "warnings": metadata_result.warnings or [],
+                        "enriched_games": metadata_result.enriched_games,
+                        "action_label": "Force DAT File",
+                    },
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.result_queue.put(("detect_dat_error", str(exc)))
 
     def _on_analyze(self) -> None:
         if self._analysis_running or self._asset_check_running:
@@ -172,28 +413,39 @@ class MainWindow(ctk.CTk):
         self.library_view.reset()
         self.game_list.reset()
         self.game_list.set_enabled(False)
-        preferred_ecosystem = self._preferred_ecosystem_from_ui(self.source_mode_var.get())
+        scan_mode = self._scan_mode_from_ui(self.source_mode_var.get())
+        metadata_root = self._preloaded_metadata_root_from_ui()
+        use_hash_fallback = bool(self.preloaded_hashes_var.get())
 
         worker = threading.Thread(
             target=self._analyze_worker,
-            args=(source_path, preferred_ecosystem),
+            args=(source_path, scan_mode, metadata_root, use_hash_fallback),
             daemon=True,
         )
         worker.start()
 
-    def _analyze_worker(self, source_path: Path, preferred_ecosystem: str | None) -> None:
+    def _analyze_worker(
+        self,
+        source_path: Path,
+        scan_mode: str,
+        preloaded_metadata_root: Path | None,
+        compute_missing_hashes: bool,
+    ) -> None:
         try:
             self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:start")
             detection_result = self.detector.detect(
                 source_path,
                 progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
-                preferred_ecosystem=preferred_ecosystem,
+                scan_mode=scan_mode,
             )
             self._enqueue_progress("analysis", "analysis_progress", "[stage] detect:done")
             self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:start")
             normalization_result = self.normalizer.normalize(
                 detection_result,
                 progress_callback=lambda line: self._enqueue_progress("analysis", "analysis_progress", line),
+                scan_mode=scan_mode,
+                preloaded_metadata_root=preloaded_metadata_root,
+                compute_missing_hashes=compute_missing_hashes,
             )
             self._enqueue_progress("analysis", "analysis_progress", "[stage] normalize:done")
             self.result_queue.put(("analysis_complete", (detection_result, normalization_result)))
@@ -224,6 +476,12 @@ class MainWindow(ctk.CTk):
                     self._on_verify_assets_complete(payload)  # type: ignore[arg-type]
                 elif event_type == "verify_assets_error":
                     self._on_verify_assets_error(str(payload))
+                elif event_type == "detect_dat_progress":
+                    self.progress_log.log(str(payload))
+                elif event_type == "detect_dat_complete":
+                    self._on_detect_dats_complete(payload)  # type: ignore[arg-type]
+                elif event_type == "detect_dat_error":
+                    self._on_detect_dats_error(str(payload))
         except Empty:
             pass
         finally:
@@ -513,6 +771,55 @@ class MainWindow(ctk.CTk):
         self.convert_pane.set_enabled(has_games)
         self.game_list.set_enabled(True)
 
+    def _on_detect_dats_complete(self, payload: dict[str, object]) -> None:
+        matches = payload.get("matches", {})
+        unresolved = payload.get("unresolved", [])
+        warnings = payload.get("warnings", [])
+        target_count = int(payload.get("target_count", 0))
+        enriched_games = int(payload.get("enriched_games", 0))
+        action_label = str(payload.get("action_label", "DAT detection"))
+
+        matched_count = len(matches) if isinstance(matches, dict) else 0
+        unresolved_count = len(unresolved) if isinstance(unresolved, list) else 0
+        if isinstance(matches, dict):
+            for system_id, match in matches.items():
+                dat_name = getattr(match, "dat_path", Path("-")).name
+                confidence = getattr(match, "confidence", "n/a")
+                self.progress_log.log(
+                    f"[metadata] {system_id}: detected '{dat_name}' (confidence {confidence})"
+                )
+        if isinstance(unresolved, list) and unresolved:
+            self.progress_log.log(f"[metadata] unresolved systems: {', '.join(str(item) for item in unresolved)}")
+        if isinstance(warnings, list):
+            for warning in warnings:
+                self.progress_log.log(f"[metadata warning] {warning}")
+
+        if self.current_library is not None:
+            self.library_view.set_library(self.current_library)
+            self.game_list.set_library(
+                self.current_library,
+                progress_callback=lambda msg: self._enqueue_progress("analysis", "detect_dat_progress", msg),
+            )
+
+        self._set_status(
+            f"{action_label} complete. Matched {matched_count}/{target_count} systems; unresolved {unresolved_count}; "
+            f"enriched {enriched_games} games."
+        )
+        self._dat_detection_running = False
+        self._set_global_busy(False)
+        has_games = bool(self.current_library and any(self.current_library.games_by_system.values()))
+        self.convert_pane.set_enabled(has_games)
+        self.game_list.set_enabled(True)
+
+    def _on_detect_dats_error(self, message: str) -> None:
+        self.progress_log.log(f"[error] DAT detection failed: {message}")
+        self._set_status(f"DAT detection failed: {message}", is_error=True)
+        self._dat_detection_running = False
+        self._set_global_busy(False)
+        has_games = bool(self.current_library and any(self.current_library.games_by_system.values()))
+        self.convert_pane.set_enabled(has_games)
+        self.game_list.set_enabled(True)
+
     def _set_global_busy(self, busy: bool) -> None:
         # Shared busy state to prevent conflicting actions while workers run.
         state = "disabled" if busy else "normal"
@@ -520,6 +827,12 @@ class MainWindow(ctk.CTk):
         self.browse_button.configure(state=state)
         self.source_entry.configure(state=state)
         self.source_mode_menu.configure(state=state)
+        self.preloaded_metadata_root_entry.configure(state=state)
+        self.preloaded_metadata_root_browse.configure(state=state)
+        self.detect_dat_button.configure(state=state)
+        self.force_dat_file_button.configure(state=state)
+        self.strict_dat_verify_check.configure(state=state)
+        self.preloaded_hashes_check.configure(state=state)
 
     def _enqueue_progress(self, channel: str, event_type: str, message: str) -> None:
         now = time.monotonic()
@@ -530,17 +843,26 @@ class MainWindow(ctk.CTk):
             self._last_progress_emit[channel] = now
         self.result_queue.put((event_type, message))
 
+    def _on_library_system_selected(self, system_id: str) -> None:
+        self.game_list.set_system_filter(system_id)
+
     @staticmethod
-    def _preferred_ecosystem_from_ui(selection: str) -> str | None:
+    def _scan_mode_from_ui(selection: str) -> str:
         mapping = {
-            "LaunchBox (Root/Data)": "launchbox",
-            "ES Family (gamelist)": "es_family",
-            "ES-DE": "es_de",
-            "RetroBat": "retrobat",
-            "RetroArch/Playlist": "retroarch",
-            "AttractMode": "attract_mode",
-            "Pegasus": "pegasus",
-            "OnionOS": "onionos",
-            "muOS": "muos",
+            "Auto (Meta)": "meta",
+            "Auto (Scan)": "deep",
+            "Auto (Force Scan)": "force",
+            "Launchbox Root/Data": "launchbox",
+            "Single Rom Folder": "single_rom_folder",
         }
-        return mapping.get(selection)
+        return mapping.get(selection, "meta")
+
+    def _preloaded_metadata_root_from_ui(self) -> Path | None:
+        value = self.preloaded_metadata_root_entry.get().strip()
+        if not value:
+            return None
+        candidate = Path(value)
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+        self._enqueue_progress("analysis", "analysis_progress", f"[metadata] Ignoring invalid DAT root: {value}")
+        return None

@@ -409,3 +409,26 @@ class GameListSelectionIntegrityTests(unittest.TestCase):
             self.assertNotIn("UNCHECKED-VID", after_assets)
 
         root.destroy()
+
+    def test_visible_system_scope_changes_with_filters(self) -> None:
+        import customtkinter as ctk
+        from retrometasync.ui.game_list import GameListPane
+
+        root = ctk.CTk()
+        root.withdraw()
+        pane = GameListPane(root)
+        pane.set_library(_make_library())
+        for _ in range(5):
+            root.update_idletasks()
+
+        self.assertFalse(pane.has_active_filters())
+        self.assertEqual(set(pane.visible_system_ids()), {"nes", "snes"})
+
+        pane.system_filter_var.set("snes")
+        pane._apply_filter_refresh()
+        for _ in range(5):
+            root.update_idletasks()
+        self.assertTrue(pane.has_active_filters())
+        self.assertEqual(pane.visible_system_ids(), ["snes"])
+
+        root.destroy()

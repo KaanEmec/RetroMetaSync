@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from retrometasync.config.ecosystems import ECOSYSTEMS, SIGNATURE_HINTS
+from retrometasync.config.system_aliases import canonicalize_system_id
 from retrometasync.core.models import Library, MetadataSource, System
 
 ROM_EXTENSIONS: set[str] = {
@@ -60,6 +61,17 @@ ASSET_DIRECTORY_HINTS: set[str] = {
     "screenshots",
     "covers",
     "miximages",
+    "3dboxes",
+    "backcovers",
+    "titlescreens",
+    "marquees",
+    "fanart",
+    "wheel",
+    "boxart",
+    "snaps",
+    "named_boxarts",
+    "named_snaps",
+    "named_titles",
 }
 
 
@@ -72,6 +84,7 @@ class DetectionResult:
     ecosystem_scores: dict[str, float] = field(default_factory=dict)
     systems: list[System] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    scan_mode: str = "deep"
 
     def to_library(self) -> Library:
         systems_map = {system.system_id: system for system in self.systems}
@@ -119,22 +132,28 @@ class LibraryDetector:
         source_root: Path,
         progress_callback: Callable[[str], None] | None = None,
         preferred_ecosystem: str | None = None,
+        scan_mode: str = "deep",
     ) -> DetectionResult:
         self._progress_callback = progress_callback
         self._has_any_cache.clear()
         self._has_dir_named_cache.clear()
         self._system_dir_scan_cache.clear()
         selected_root = source_root.expanduser().resolve()
+        normalized_scan_mode = (scan_mode or "deep").strip().lower()
         preferred = (preferred_ecosystem or "").strip().lower() or None
+
+        if normalized_scan_mode == "single_rom_folder":
+            return self._single_rom_folder_result(selected_root, normalized_scan_mode)
 
         preferred_result = self._detect_from_preference(selected_root, preferred)
         if preferred_result is not None:
             self._emit(progress_callback, f"[detect] Preferred source mode '{preferred}' accepted.")
+            preferred_result.scan_mode = normalized_scan_mode
             return preferred_result
 
         launchbox_root = self._launchbox_root_from_selected(selected_root)
         # If caller explicitly picks LaunchBox mode, trust that hint and bypass heavy generic probing.
-        if preferred_ecosystem == "launchbox" and launchbox_root is not None:
+        if (preferred_ecosystem == "launchbox" or normalized_scan_mode == "launchbox") and launchbox_root is not None:
             root = launchbox_root
             self._emit(progress_callback, f"[detect] LaunchBox mode enabled. Using root: {root}")
             facts = _ScanFacts(
@@ -157,6 +176,7 @@ class LibraryDetector:
                 ecosystem_scores=scores,
                 systems=systems,
                 warnings=warnings,
+                scan_mode=normalized_scan_mode,
             )
 
         root = launchbox_root or selected_root
@@ -175,6 +195,7 @@ class LibraryDetector:
                 ecosystem_scores=scores,
                 systems=systems,
                 warnings=self._build_warnings(quick_facts, ecosystem),
+                scan_mode=normalized_scan_mode,
             )
 
         self._emit(progress_callback, f"[detect] Scanning root: {root}")
@@ -198,6 +219,30 @@ class LibraryDetector:
             ecosystem_scores=scores,
             systems=systems,
             warnings=warnings,
+            scan_mode=normalized_scan_mode,
+        )
+
+    def _single_rom_folder_result(self, source_root: Path, scan_mode: str) -> DetectionResult:
+        system_id = canonicalize_system_id(source_root.name)
+        system = System(
+            system_id=system_id,
+            display_name=source_root.name,
+            rom_root=source_root,
+            metadata_source=MetadataSource.NONE,
+            metadata_paths=[],
+            detected_ecosystem="es_classic",
+        )
+        scores = {name: 0.0 for name in ECOSYSTEMS}
+        scores["es_classic"] = 10.0
+        return DetectionResult(
+            source_root=source_root,
+            detected_ecosystem="es_classic",
+            detected_family="es_family",
+            confidence=1.0,
+            ecosystem_scores=scores,
+            systems=[system],
+            warnings=[],
+            scan_mode=scan_mode,
         )
 
     def _scan_facts(self, root: Path) -> _ScanFacts:
@@ -460,7 +505,7 @@ class LibraryDetector:
             if system_dir.name.lower() in {"gamelists", "metadata"}:
                 continue
 
-            system_id = system_dir.name.lower()
+            system_id = canonicalize_system_id(system_dir.name)
             if system_id in seen_ids:
                 continue
             seen_ids.add(system_id)
@@ -484,7 +529,7 @@ class LibraryDetector:
                     continue
                 if child.name.lower() in {"images", "videos", "manuals"}:
                     continue
-                system_id = child.name.lower()
+                system_id = canonicalize_system_id(child.name)
                 if system_id in seen_ids:
                     continue
                 seen_ids.add(system_id)
@@ -508,7 +553,7 @@ class LibraryDetector:
             self._emit(self._progress_callback, f"[detect] ES-DE gamelist root found: {gamelists_root}")
             for system_dir in sorted(path for path in gamelists_root.iterdir() if path.is_dir()):
                 gamelist_path = system_dir / "gamelist.xml"
-                system_id = system_dir.name.lower()
+                system_id = canonicalize_system_id(system_dir.name)
                 seen_ids.add(system_id)
                 systems.append(
                     System(
@@ -526,7 +571,7 @@ class LibraryDetector:
             for child in sorted(path for path in roms_root.iterdir() if path.is_dir()):
                 if not self._looks_like_system_dir(child):
                     continue
-                system_id = child.name.lower()
+                system_id = canonicalize_system_id(child.name)
                 if system_id in seen_ids:
                     continue
                 seen_ids.add(system_id)
@@ -554,7 +599,7 @@ class LibraryDetector:
             system_name = xml_path.stem
             systems.append(
                 System(
-                    system_id=system_name.lower().replace(" ", "_"),
+                    system_id=canonicalize_system_id(system_name),
                     display_name=system_name,
                     rom_root=launchbox_root,
                     metadata_source=MetadataSource.LAUNCHBOX_XML,
@@ -570,7 +615,7 @@ class LibraryDetector:
             system_name = lpl_path.stem
             systems.append(
                 System(
-                    system_id=system_name.lower().replace(" ", "_"),
+                    system_id=canonicalize_system_id(system_name),
                     display_name=system_name,
                     rom_root=lpl_path.parent,
                     metadata_source=MetadataSource.RETROARCH_LPL,
@@ -590,7 +635,7 @@ class LibraryDetector:
             system_name = txt_path.stem
             systems.append(
                 System(
-                    system_id=system_name.lower().replace(" ", "_"),
+                    system_id=canonicalize_system_id(system_name),
                     display_name=system_name,
                     rom_root=root,
                     metadata_source=MetadataSource.ROMLIST_TXT,
@@ -610,7 +655,7 @@ class LibraryDetector:
             miyoo_path = system_dir / "miyoogamelist.xml"
             systems.append(
                 System(
-                    system_id=system_dir.name.lower(),
+                    system_id=canonicalize_system_id(system_dir.name),
                     display_name=system_dir.name,
                     rom_root=system_dir,
                     metadata_source=MetadataSource.MIYOO_GAMELIST,
@@ -629,7 +674,7 @@ class LibraryDetector:
         for system_dir in sorted(path for path in catalogue_root.iterdir() if path.is_dir()):
             systems.append(
                 System(
-                    system_id=system_dir.name.lower(),
+                    system_id=canonicalize_system_id(system_dir.name),
                     display_name=system_dir.name,
                     rom_root=root,
                     metadata_source=MetadataSource.NONE,
@@ -645,7 +690,7 @@ class LibraryDetector:
             system_dir = metadata_file.parent
             systems.append(
                 System(
-                    system_id=system_dir.name.lower(),
+                    system_id=canonicalize_system_id(system_dir.name),
                     display_name=system_dir.name,
                     rom_root=system_dir,
                     metadata_source=MetadataSource.METADATA_PEGASUS,

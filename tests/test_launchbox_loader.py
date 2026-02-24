@@ -50,10 +50,10 @@ class LaunchBoxXmlLoaderTests(unittest.TestCase):
 
             result = LaunchBoxXmlLoader().load(LoaderInput(source_root=root))
             self.assertEqual(len(result.warnings), 0)
-            self.assertIn("super_nintendo", result.games_by_system)
-            self.assertEqual(len(result.games_by_system["super_nintendo"]), 1)
+            self.assertIn("snes", result.games_by_system)
+            self.assertEqual(len(result.games_by_system["snes"]), 1)
 
-            game = result.games_by_system["super_nintendo"][0]
+            game = result.games_by_system["snes"][0]
             self.assertEqual(game.title, "Secret of Mana")
             self.assertEqual(game.sort_title, "Mana, Secret of")
             self.assertTrue(game.favorite)
@@ -84,8 +84,8 @@ class LaunchBoxXmlLoaderTests(unittest.TestCase):
 
             result = LaunchBoxXmlLoader().load(LoaderInput(source_root=launchbox_root))
             self.assertEqual(len(result.warnings), 0)
-            self.assertIn("nintendo_64", result.games_by_system)
-            self.assertEqual(len(result.games_by_system["nintendo_64"]), 1)
+            self.assertIn("n64", result.games_by_system)
+            self.assertEqual(len(result.games_by_system["n64"]), 1)
 
 
 if __name__ == "__main__":
